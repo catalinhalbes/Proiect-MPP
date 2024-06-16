@@ -9,20 +9,21 @@ constexpr double MIN_DIFF = 1e-9;
 
 constexpr size_t MAX_IT = 1000;
 
-constexpr size_t X_ASPECT_RATIO = 2;
-constexpr size_t Y_ASPECT_RATIO = 2;
+constexpr size_t X_ASPECT_RATIO = 1;
+constexpr size_t Y_ASPECT_RATIO = 1;
 constexpr size_t Z_ASPECT_RATIO = 1;
 
-constexpr size_t N = 100;
+constexpr size_t N = 25;
 constexpr size_t N1 = N * X_ASPECT_RATIO;
 constexpr size_t N2 = N * Y_ASPECT_RATIO;
 constexpr size_t N3 = N * Z_ASPECT_RATIO;
 
 class Matrix3D {
-    private:
+    public:
         double* elems;
         size_t dim_X, dim_Y, dim_Z;
         size_t stride_X, stride_Y;
+        size_t size;
 
         static inline void check_size(const Matrix3D& mat1, const Matrix3D& mat2) {
             if (
@@ -60,22 +61,53 @@ class Matrix3D {
             }
         }
     
-    public:
+    // public:
         Matrix3D(size_t dim_X, size_t dim_Y, size_t dim_Z, bool init_zero = false) {
             this->dim_X = dim_X;
             this->dim_Y = dim_Y;
             this->dim_Z = dim_Z;
             this->stride_X = dim_Y * dim_Z;
             this->stride_Y = dim_Z;
+            this->size = dim_X * dim_Y * dim_Z;
 
             // printf("Allocating %llu elements\n", dim_X * dim_Y * dim_Z);
 
             if (init_zero) {
-                elems = new double[dim_X * dim_Y * dim_Z]();
+                elems = new double[size]();
             }
             else {
-                elems = new double[dim_X * dim_Y * dim_Z];
+                elems = new double[size];
             }
+        }
+
+        Matrix3D(const std::string& filename) {
+            std::FILE* f = std::fopen(filename.c_str(), "rb");
+            if (f == nullptr) {
+                throw std::runtime_error("Unable to open file: " + filename);
+            }
+
+            std::fread(&dim_X, sizeof(size_t), 1, f);
+            std::fread(&dim_Y, sizeof(size_t), 1, f);
+            std::fread(&dim_Z, sizeof(size_t), 1, f);
+
+            size = dim_X * dim_Y * dim_Z;
+
+            if (size == 0) {
+                std::fclose(f);
+                throw std::runtime_error("Invalid size for elems: (" + 
+                    std::to_string(dim_X) + ", " + 
+                    std::to_string(dim_Y) + ", " +
+                    std::to_string(dim_Z) + ")"
+                ); 
+            }
+            elems = new double[size];
+
+            if (std::fread(elems, sizeof(double), size, f) != size) {
+                std::fclose(f);
+                delete[] elems;
+                throw std::runtime_error("Unable to read all elements!");
+            }
+            std::fclose(f);
         }
 
         virtual ~Matrix3D() {
@@ -86,6 +118,24 @@ class Matrix3D {
             dim_X = dim_Y = dim_Z = 0;
             delete[] elems;
             elems = nullptr;
+        }
+
+        void write_to_file(const std::string& filename) const {
+            std::FILE* f = std::fopen(filename.c_str(), "wb");
+
+            if (f == nullptr) {
+                throw std::runtime_error("Unable to open file: " + filename);
+            }
+
+            std::fwrite(&dim_X, sizeof(size_t), 1, f);
+            std::fwrite(&dim_Y, sizeof(size_t), 1, f);
+            std::fwrite(&dim_Z, sizeof(size_t), 1, f);
+
+            if (std::fwrite(elems, sizeof(double), size, f) != size) {
+                std::fclose(f);
+                throw std::runtime_error("Unable to write all elements!");
+            }
+            std::fclose(f);
         }
 
         inline double get(size_t x, size_t y, size_t z) const {
@@ -145,7 +195,19 @@ class Matrix3D {
         }
 };
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc < 7) {
+        printf("Usage: %s [u_mat_in] [v_mat_in] [t_mat_in] [u_out] [v_out] [t_out]\n", argv[0]);
+        return 1;
+    }
+
+    std::string u_in = argv[1];
+    std::string v_in = argv[2];
+    std::string t_in = argv[3];
+    std::string u_out = argv[4];
+    std::string v_out = argv[5];
+    std::string t_out = argv[6];
+
     Matrix3D u(N1, N2, N3, true);
     Matrix3D v(N1, N2, N3, true);
     Matrix3D t(N1, N2, N3, true);
@@ -153,8 +215,6 @@ int main() {
     Matrix3D u_new(N1, N2, N3);
     Matrix3D v_new(N1, N2, N3);
     Matrix3D t_new(N1, N2, N3);
-
-    // t.set(54, 24, 67, 2.0); // use this with N1 100, N2 200, N3 200 to get 69 iterations (nice)
 
     size_t nr_it = 0;
     bool stop = false;
@@ -166,7 +226,8 @@ int main() {
             for (size_t j = 1; j < N2 - 1; j++) {
                 for (size_t k = 1; k < N3 - 1; k++) {
                     u_new.set(i, j, k,
-                        RA * HEIGHT / 12.0 * (t.get(i, j + 1, k) - t.get(i, j - 1, k)) + 
+                        RA * HEIGHT / 12.0 * 
+                        (t.get(i, j + 1, k) - t.get(i, j - 1, k)) + 
                         (1.0 / 6.0) * (
                             u.get(i - 1, j, k) + u.get(i + 1, j, k) + 
                             u.get(i, j - 1, k) + u.get(i, j + 1, k) + 
@@ -175,7 +236,8 @@ int main() {
                     );
 
                     v_new.set(i, j, k,
-                        RA * HEIGHT / 12.0 * (t.get(i + 1, j , k) - t.get(i - 1, j , k)) + 
+                        RA * HEIGHT / 12.0 * 
+                        (t.get(i + 1, j, k) - t.get(i - 1, j, k)) + 
                         (1.0 / 6.0) * (
                             v.get(i - 1, j, k) + v.get(i + 1, j, k) + 
                             v.get(i, j - 1, k) + v.get(i, j + 1, k) + 
@@ -184,8 +246,11 @@ int main() {
                     );
 
                     t_new.set(i, j, k, 
-                        t.get(i - 1, j, k) + t.get(i + 1, j, k) + t.get(i, j - 1, k) + t.get(i, j + 1, k) + t.get(i, j, k - 1) + t.get(i, j, k + 1) +
-                        (HEIGHT * HEIGHT) - (1.0 / 4.0) * (
+                        (1.0 / 6.0) * (
+                            t.get(i - 1, j, k) + t.get(i + 1, j, k) + 
+                            t.get(i, j - 1, k) + t.get(i, j + 1, k) + 
+                            t.get(i, j, k - 1) + t.get(i, j, k + 1)
+                        ) + (HEIGHT * HEIGHT) - (1.0 / 4.0) * (
                             (u.get(i, j, k + 1) - u.get(i, j, k - 1)) * (t.get(i, j + 1, k) - t.get(i, j - 1, k)) -
                             (u.get(i, j + 1, k) - u.get(i, j - 1, k)) * (t.get(i, j, k + 1) - t.get(i, j, k - 1)) +
                             (v.get(i + 1, j, k) - v.get(i - 1, j, k)) * (t.get(i, j, k + 1) - t.get(i, j, k - 1)) -
@@ -245,5 +310,9 @@ int main() {
         t.swap(t_new);
     }
 
-    printf("Iterations: %llu\n", nr_it);
+    printf("Iterations: %lu\n", nr_it);
+
+    u.write_to_file(u_out);
+    v.write_to_file(v_out);
+    t.write_to_file(t_out);
 }
