@@ -1,13 +1,16 @@
 #include <iostream>
+#include <utility>
 #include <stdexcept>
 #include <cstdint>
 #include <string>
 
-constexpr double RA = 100.0;
+constexpr double RA = 500.0;
 constexpr double HEIGHT = 1.0;
-constexpr double MIN_DIFF = 1e-9;
+constexpr double MIN_DIFF = 1e-15;
+constexpr double COLD_WALL_TEMP = 0.0;
+constexpr double HOT_WALL_TEMP = 0.0;
 
-constexpr size_t MAX_IT = 1000;
+constexpr size_t MAX_IT = 100;
 
 constexpr size_t X_ASPECT_RATIO = 1;
 constexpr size_t Y_ASPECT_RATIO = 1;
@@ -17,6 +20,8 @@ constexpr size_t N = 25;
 constexpr size_t N1 = N * X_ASPECT_RATIO;
 constexpr size_t N2 = N * Y_ASPECT_RATIO;
 constexpr size_t N3 = N * Z_ASPECT_RATIO;
+
+constexpr double DELTA = HEIGHT / (double) N;
 
 class Matrix3D {
     public:
@@ -80,6 +85,29 @@ class Matrix3D {
             }
         }
 
+        Matrix3D(const Matrix3D& ot) {
+            this->dim_X = ot.dim_X;
+            this->dim_Y = ot.dim_Y;
+            this->dim_Z = ot.dim_Z;
+            this->stride_X = ot.stride_X;
+            this->stride_Y = ot.stride_Y;
+            this->size = ot.size;
+
+            this->elems = new double[size];
+            std::copy(ot.elems, ot.elems + ot.size, this->elems);
+        }
+
+        Matrix3D(Matrix3D&& ot) {
+            this->dim_X = ot.dim_X;
+            this->dim_Y = ot.dim_Y;
+            this->dim_Z = ot.dim_Z;
+            this->stride_X = ot.stride_X;
+            this->stride_Y = ot.stride_Y;
+            this->size = ot.size;
+
+            this->elems = std::exchange(ot.elems, nullptr);
+        }
+
         Matrix3D(const std::string& filename) {
             std::FILE* f = std::fopen(filename.c_str(), "rb");
             if (f == nullptr) {
@@ -108,6 +136,27 @@ class Matrix3D {
                 throw std::runtime_error("Unable to read all elements!");
             }
             std::fclose(f);
+        }
+
+        Matrix3D& operator= (const Matrix3D& ot) {
+            // Guard self assignment
+            if (this == &ot)
+                return *this;
+        
+            if (this->size != ot.size) { // resource in *this cannot be reused
+                this->size = ot.size;
+                delete[]  elems;
+                elems = new double[ot.size];
+            } 
+
+            this->dim_X = ot.dim_X;
+            this->dim_Y = ot.dim_Y;
+            this->dim_Z = ot.dim_Z;
+            this->stride_X = ot.stride_X;
+            this->stride_Y = ot.stride_Y;
+        
+            std::copy(ot.elems, ot.elems + ot.size, this->elems);
+            return *this;
         }
 
         virtual ~Matrix3D() {
@@ -149,32 +198,24 @@ class Matrix3D {
         }
 
         void swap(Matrix3D& ot) {
-            size_t aux;
-            double* aux_elems;
+            check_size(*this, ot);
+            this->elems = std::exchange(ot.elems, this->elems);
+            this->dim_X = std::exchange(ot.dim_X, this->dim_X);
+            this->dim_Y = std::exchange(ot.dim_Y, this->dim_Y);
+            this->dim_Z = std::exchange(ot.dim_Z, this->dim_Z);
+            this->stride_X = std::exchange(ot.stride_X, this->stride_X);
+            this->stride_Y = std::exchange(ot.stride_Y, this->stride_Y);
+        }
 
-            aux_elems = elems;
-            elems = ot.elems;
-            ot.elems = aux_elems;
+        double max() const {
+            double max = elems[0];
 
-            aux = dim_X;
-            dim_X = ot.dim_X;
-            ot.dim_X = aux;
+            for (size_t i = 0; i < size; i++) {
+                if (elems[i] > max) 
+                    max = elems[i];
+            }
 
-            aux = dim_Y;
-            dim_Y = ot.dim_Y;
-            ot.dim_Y = aux;
-
-            aux = dim_Z;
-            dim_Z = ot.dim_Z;
-            ot.dim_Z = aux;
-
-            aux = stride_X;
-            stride_X = ot.stride_X;
-            ot.stride_X = aux;
-
-            aux = stride_Y;
-            stride_Y = ot.stride_Y;
-            ot.stride_Y = aux;
+            return max;
         }
 
         static double max_diff(const Matrix3D& mat1, const Matrix3D& mat2) {
@@ -212,22 +253,41 @@ int main(int argc, char* argv[]) {
     Matrix3D v(N1, N2, N3, true);
     Matrix3D t(N1, N2, N3, true);
 
-    Matrix3D u_new(N1, N2, N3);
-    Matrix3D v_new(N1, N2, N3);
-    Matrix3D t_new(N1, N2, N3);
+    // x = 0 is the HOT wall
+    for (size_t j = 0; j < N2; j += 1) {
+        for (size_t k = 0; k < N3; k++) {
+            t.set(0, j, k, HOT_WALL_TEMP);
+        }
+    } 
+
+    // x = (N1-1) is the COLD wall
+    for (size_t j = 0; j < N2; j += 1) {
+        for (size_t k = 0; k < N3; k++) {
+            t.set(N1 - 1, j, k, COLD_WALL_TEMP);
+        }
+    } 
+
+    Matrix3D u_new(u);
+    Matrix3D v_new(v);
+    Matrix3D t_new(t);
 
     size_t nr_it = 0;
     bool stop = false;
 
-    while (!stop && nr_it < MAX_IT) {
+    while (/*!stop &&*/ nr_it < MAX_IT) {
+        if (nr_it % 5 == 0) {
+            t.write_to_file(t_out + ".iter_" + std::to_string(nr_it) + ".bin");
+            u.write_to_file(u_out + ".iter_" + std::to_string(nr_it) + ".bin");
+            v.write_to_file(v_out + ".iter_" + std::to_string(nr_it) + ".bin");
+        }
+
         nr_it += 1;
 
         for (size_t i = 1; i < N1 - 1; i++) {
             for (size_t j = 1; j < N2 - 1; j++) {
                 for (size_t k = 1; k < N3 - 1; k++) {
                     u_new.set(i, j, k,
-                        RA * HEIGHT / 12.0 * 
-                        (t.get(i, j + 1, k) - t.get(i, j - 1, k)) + 
+                        RA * DELTA / 12.0 * (t.get(i, j + 1, k) - t.get(i, j - 1, k)) + 
                         (1.0 / 6.0) * (
                             u.get(i - 1, j, k) + u.get(i + 1, j, k) + 
                             u.get(i, j - 1, k) + u.get(i, j + 1, k) + 
@@ -236,8 +296,7 @@ int main(int argc, char* argv[]) {
                     );
 
                     v_new.set(i, j, k,
-                        RA * HEIGHT / 12.0 * 
-                        (t.get(i + 1, j, k) - t.get(i - 1, j, k)) + 
+                        RA * DELTA / 12.0 * (t.get(i + 1, j, k) - t.get(i - 1, j, k)) + 
                         (1.0 / 6.0) * (
                             v.get(i - 1, j, k) + v.get(i + 1, j, k) + 
                             v.get(i, j - 1, k) + v.get(i, j + 1, k) + 
@@ -250,11 +309,12 @@ int main(int argc, char* argv[]) {
                             t.get(i - 1, j, k) + t.get(i + 1, j, k) + 
                             t.get(i, j - 1, k) + t.get(i, j + 1, k) + 
                             t.get(i, j, k - 1) + t.get(i, j, k + 1)
-                        ) + (HEIGHT * HEIGHT) - (1.0 / 4.0) * (
-                            (u.get(i, j, k + 1) - u.get(i, j, k - 1)) * (t.get(i, j + 1, k) - t.get(i, j - 1, k)) -
-                            (u.get(i, j + 1, k) - u.get(i, j - 1, k)) * (t.get(i, j, k + 1) - t.get(i, j, k - 1)) +
-                            (v.get(i + 1, j, k) - v.get(i - 1, j, k)) * (t.get(i, j, k + 1) - t.get(i, j, k - 1)) -
-                            (v.get(i, j, k + 1) - v.get(i, j, k - 1)) * (t.get(i + 1, j, k) - t.get(i - 1, j, k))
+                            + (DELTA * DELTA) - (1.0 / 4.0) * (
+                                (u.get(i, j, k + 1) - u.get(i, j, k - 1)) * (t.get(i, j + 1, k) - t.get(i, j - 1, k)) -
+                                (u.get(i, j + 1, k) - u.get(i, j - 1, k)) * (t.get(i, j, k + 1) - t.get(i, j, k - 1)) +
+                                (v.get(i + 1, j, k) - v.get(i - 1, j, k)) * (t.get(i, j, k + 1) - t.get(i, j, k - 1)) -
+                                (v.get(i, j, k + 1) - v.get(i, j, k - 1)) * (t.get(i + 1, j, k) - t.get(i - 1, j, k))
+                            )
                         )
                     );
 
@@ -271,28 +331,33 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // adiabatic condition
-        for (size_t j = 1; j < N2 - 1; j++) {
-            for (size_t k = 1; k < N3 - 1; k++) {
-                t_new.set(0, j, k, t_new.get(1, j, k));
-            }
-        }
+        // adiabatic conditions
 
-        for (size_t j = 1; j < N2 - 1; j++) {
-            for (size_t k = 1; k < N3 - 1; k++) {
-                t_new.set(N1 - 1, j, k, t_new.get(N1 - 2, j, k));
-            }
-        }
-
-        for (size_t i = 1; i < N1 - 1; i++) {
-            for (size_t k = 1; k < N3 - 1; k++) {
+        // y = 0 wall == y = 1 wall
+        for (size_t i = 0; i < N1; i++) {
+            for (size_t k = 0; k < N3; k++) {
                 t_new.set(i, 0, k, t_new.get(i, 1, k));
             }
         }
 
-        for (size_t i = 1; i < N1 - 1; i++) {
-            for (size_t k = 1; k < N3 - 1; k++) {
+        // y = (N2 - 1) wall == y = (N2 - 2) wall
+        for (size_t i = 0; i < N1; i++) {
+            for (size_t k = 0; k < N3; k++) {
                 t_new.set(i, N2 - 1, k, t_new.get(i, N2 - 2, k));
+            }
+        }
+
+        // z = 0 wall == z = 1 wall
+        for (size_t i = 0; i < N1; i++) {
+            for (size_t j = 0; j < N2; j++) {
+                t_new.set(i, j, 0, t_new.get(i, j, 1));
+            }
+        }
+
+        // z = (N3 - 1) wall == z = (N3 - 2) wall
+        for (size_t i = 0; i < N1; i++) {
+            for (size_t j = 0; j < N2; j++) {
+                t_new.set(i, j, N3 - 1, t_new.get(i, j, N3 - 2));
             }
         }
 
