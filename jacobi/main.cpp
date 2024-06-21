@@ -4,13 +4,15 @@
 #include <cstdint>
 #include <string>
 
-constexpr double RA = 500.0;
+constexpr double RA = 1000.0;
 constexpr double HEIGHT = 1.0;
 constexpr double MIN_DIFF = 1e-15;
 constexpr double COLD_WALL_TEMP = 0.0;
 constexpr double HOT_WALL_TEMP = 0.0;
 
-constexpr size_t MAX_IT = 100;
+constexpr size_t MAX_IT = 1000;
+// how often to output results in iterations
+constexpr size_t STEP = 10;
 
 constexpr size_t X_ASPECT_RATIO = 1;
 constexpr size_t Y_ASPECT_RATIO = 1;
@@ -275,7 +277,7 @@ int main(int argc, char* argv[]) {
     bool stop = false;
 
     while (/*!stop &&*/ nr_it < MAX_IT) {
-        if (nr_it % 5 == 0) {
+        if (nr_it % STEP == 0) {
             t.write_to_file(t_out + ".iter_" + std::to_string(nr_it) + ".bin");
             u.write_to_file(u_out + ".iter_" + std::to_string(nr_it) + ".bin");
             v.write_to_file(v_out + ".iter_" + std::to_string(nr_it) + ".bin");

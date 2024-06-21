@@ -49,14 +49,14 @@ if __name__ == "__main__":
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
 
-        vmin = -2
-        vmax = 2
+        vmin = 0
+        vmax = 1
 
         kw = {
             'vmin': vmin,
             'vmax': vmax,
             'levels': np.linspace(vmin, vmax, 100),
-            'cmap': "coolwarm"
+            #'cmap': "coolwarm"
         }
 
         # plot
