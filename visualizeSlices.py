@@ -29,7 +29,7 @@ if __name__ == "__main__":
         print(f"Usage: python {sys.argv[0]} <n_sections> <input_directory> <output_directory>")
         exit(1)
 
-    n_sections = sys.argv[1]
+    n_sections = int(sys.argv[1])
     input_directory = sys.argv[2]
     output_directory = sys.argv[3]
     files = list_files(input_directory)
@@ -41,7 +41,7 @@ if __name__ == "__main__":
         mat = loadmat(f)
         N1, N2, N3 = mat.shape
 
-        X, Y, Z = np.meshgrid(np.arange(N1), np.arange(N2), -np.arange(N3))
+        X, Y, Z = np.meshgrid(np.arange(N1), np.arange(N2), np.arange(N3))
 
         # figure
         fig = plt.figure()
@@ -65,7 +65,7 @@ if __name__ == "__main__":
             offset = round(offset)
             C = ax.contourf(
                 X[:, :, offset], Y[:, :, offset], mat[:, :, offset],
-                zdir='z', offset=-offset, **kw
+                zdir='z', offset=offset, **kw
             )
 
         xmin, xmax = X.min(), X.max()

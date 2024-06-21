@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 
-constexpr double RA = 1000.0;
+constexpr double RA = 500.0;
 constexpr double HEIGHT = 1.0;
 constexpr double MIN_DIFF = 1e-15;
 constexpr double COLD_WALL_TEMP = -1.0;
@@ -259,7 +259,7 @@ errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t i, size_t j, size
     );
 
     v.set(i, j, k,
-        RA * DELTA / 12.0 * (t.get(i + 1, j, k) - t.get(i - 1, j, k)) + 
+        -RA * DELTA / 12.0 * (t.get(i + 1, j, k) - t.get(i - 1, j, k)) + 
         (1.0 / 6.0) * (
             v.get(i - 1, j, k) + v.get(i + 1, j, k) + 
             v.get(i, j - 1, k) + v.get(i, j + 1, k) + 

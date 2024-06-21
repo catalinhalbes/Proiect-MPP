@@ -40,7 +40,7 @@ if __name__ == "__main__":
         mat = loadmat(f)
         N1, N2, N3 = mat.shape
 
-        X, Y, Z = np.meshgrid(np.arange(N1), np.arange(N2), -np.arange(N3))
+        X, Y, Z = np.meshgrid(np.arange(N1), np.arange(N2), np.arange(N3))
 
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
@@ -59,8 +59,8 @@ if __name__ == "__main__":
         }
 
         _ = ax.contourf(
-            X[:, :, 0], Y[:, :, 0], mat[:, :, 0],
-            zdir='z', offset=0, **kw
+            X[:, :, 0], Y[:, :, 0], mat[:, :, -1],
+            zdir='z', offset=Z.max(), **kw
         )
         _ = ax.contourf(
             X[0, :, :], mat[0, :, :], Z[0, :, :],
@@ -77,8 +77,8 @@ if __name__ == "__main__":
         ax.set(xlim=[xmin, xmax], ylim=[ymin, ymax], zlim=[zmin, zmax])
 
         edges_kw = dict(color='0.4', linewidth=1, zorder=1e3)
-        ax.plot([xmax, xmax], [ymin, ymax], 0, **edges_kw)
-        ax.plot([xmin, xmax], [ymin, ymin], 0, **edges_kw)
+        ax.plot([xmax, xmax], [ymin, ymax], [zmax, zmax], **edges_kw)
+        ax.plot([xmin, xmax], [ymin, ymin], [zmax, zmax], **edges_kw)
         ax.plot([xmax, xmax], [ymin, ymin], [zmin, zmax], **edges_kw)
         
         ax.set(

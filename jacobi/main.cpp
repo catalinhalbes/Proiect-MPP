@@ -298,7 +298,7 @@ int main(int argc, char* argv[]) {
                     );
 
                     v_new.set(i, j, k,
-                        RA * DELTA / 12.0 * (t.get(i + 1, j, k) - t.get(i - 1, j, k)) + 
+                        -RA * DELTA / 12.0 * (t.get(i + 1, j, k) - t.get(i - 1, j, k)) + 
                         (1.0 / 6.0) * (
                             v.get(i - 1, j, k) + v.get(i + 1, j, k) + 
                             v.get(i, j - 1, k) + v.get(i, j + 1, k) + 
