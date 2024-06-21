@@ -25,12 +25,13 @@ def list_files(directory):
     return files
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(f"Usage: python {sys.argv[0]} <input_directory> <output_directory>")
+    if len(sys.argv) != 4:
+        print(f"Usage: python {sys.argv[0]} <n_sections> <input_directory> <output_directory>")
         exit(1)
 
-    input_directory = sys.argv[1]
-    output_directory = sys.argv[2]
+    n_sections = sys.argv[1]
+    input_directory = sys.argv[2]
+    output_directory = sys.argv[3]
     files = list_files(input_directory)
     files.sort(key=lambda s: (len(s), s))
 
@@ -41,8 +42,6 @@ if __name__ == "__main__":
         N1, N2, N3 = mat.shape
 
         X, Y, Z = np.meshgrid(np.arange(N1), np.arange(N2), -np.arange(N3))
-
-        n_sections = 5
 
         # figure
         fig = plt.figure()
@@ -62,8 +61,8 @@ if __name__ == "__main__":
         }
 
         C = None
-        for i in range(n_sections):
-            offset = round(i * N3 / n_sections)
+        for offset in np.linspace(0, N3-1, n_sections):
+            offset = round(offset)
             C = ax.contourf(
                 X[:, :, offset], Y[:, :, offset], mat[:, :, offset],
                 zdir='z', offset=-offset, **kw
