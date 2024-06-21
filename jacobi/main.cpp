@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 
-constexpr double RA = 1000.0;
+constexpr double RA = 500.0;
 constexpr double HEIGHT = 1.0;
 constexpr double MIN_DIFF = 1e-15;
 constexpr double COLD_WALL_TEMP = 0.0;

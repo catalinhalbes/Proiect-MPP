@@ -42,25 +42,21 @@ if __name__ == "__main__":
 
         X, Y, Z = np.meshgrid(np.arange(N1), np.arange(N2), -np.arange(N3))
 
-        # figure
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
 
-        vmin = 0
-        vmax = 1
+        vmin = -2
+        vmax = 2
 
         kw = {
             'vmin': vmin,
             'vmax': vmax,
             'levels': np.linspace(vmin, vmax, 100),
-            #'cmap': "coolwarm"
+            'cmap': "coolwarm"
         }
-
-        # plot
-        #ax.scatter(grid[0], grid[1], grid[2], s=t, alpha=0.4)
 
         _ = ax.contourf(
             X[:, :, 0], Y[:, :, 0], mat[:, :, 0],

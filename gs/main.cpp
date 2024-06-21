@@ -7,10 +7,10 @@
 constexpr double RA = 1000.0;
 constexpr double HEIGHT = 1.0;
 constexpr double MIN_DIFF = 1e-15;
-constexpr double COLD_WALL_TEMP = 0.0;
-constexpr double HOT_WALL_TEMP = 0.0;
+constexpr double COLD_WALL_TEMP = -1.0;
+constexpr double HOT_WALL_TEMP = 1.0;
 
-constexpr size_t MAX_IT = 1000;
+constexpr size_t MAX_IT = 100;
 // how often to output results in iterations
 constexpr size_t STEP = 10;
 
@@ -244,7 +244,7 @@ struct errs {
     double err_t;
 };
 
-errs updateCells(Matrix3D u, Matrix3D v, Matrix3D t, size_t i, size_t j, size_t k) {
+errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t i, size_t j, size_t k) {
     double u_old = u.get(i, j, k);
     double v_old = v.get(i, j, k);
     double t_old = t.get(i, j, k);
