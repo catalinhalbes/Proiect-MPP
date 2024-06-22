@@ -1,2 +1,2 @@
 #!/bin/bash
-g++ -Wall -o ./build/main main.cpp -fopenmp
+g++ -O3 -Wall -o ./build/main main.cpp -fopenmp

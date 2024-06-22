@@ -3,9 +3,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <string>
-
 #include <chrono>
-#include "omp.h"
 
 constexpr double RA = 500.0;
 constexpr double HEIGHT = 1.0;
@@ -27,8 +25,7 @@ constexpr size_t N2 = N * Y_ASPECT_RATIO;
 constexpr size_t N3 = N * Z_ASPECT_RATIO;
 
 constexpr double DELTA = HEIGHT / (double) N;
-
-// constexpr double N_THREADS = 16;
+constexpr double DELTA2 = DELTA * DELTA;
 
 class Matrix3D {
     public:
@@ -249,56 +246,77 @@ struct errs {
     double err_t;
 };
 
-errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t i, size_t j, size_t k) {
-    double u_old = u.get(i, j, k);
-    double v_old = v.get(i, j, k);
-    double t_old = t.get(i, j, k);
+inline errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx) {
+    double* u_mat = u.elems;
+    double* v_mat = v.elems;
+    double* t_mat = t.elems;
+
+    // size_t u_x_stride = u.stride_X;
+    // size_t u_y_stride = u.stride_Y;
+    // size_t v_x_stride = v.stride_X;
+    // size_t v_y_stride = v.stride_Y;
+    // size_t t_x_stride = t.stride_X;
+    // size_t t_y_stride = t.stride_Y;
+
+    // all strides are equal
+    const size_t x_stride = u.stride_X;
+    const size_t y_stride = u.stride_Y;
+    const size_t z_stride = 1;
+
+    // precompute the neighbors
+    const size_t up_idx     = idx + z_stride; // z + 1
+    const size_t down_idx   = idx - z_stride; // z - 1
+    const size_t right_idx  = idx + y_stride; // y + 1
+    const size_t left_idx   = idx - y_stride; // y - 1
+    const size_t back_idx   = idx + x_stride; // x + 1
+    const size_t front_idx  = idx - x_stride; // x - 1
+
+    double u_old = u_mat[idx];
+    double v_old = v_mat[idx];
+    double t_old = t_mat[idx];
     
-    u.set(i, j, k,
-        RA * DELTA / 12.0 * (t.get(i, j + 1, k) - t.get(i, j - 1, k)) + 
+    u_mat[idx] = 
+        RA * DELTA / 12.0 * (t_mat[right_idx] - t_mat[left_idx]) + 
         (1.0 / 6.0) * (
-            u.get(i - 1, j, k) + u.get(i + 1, j, k) + 
-            u.get(i, j - 1, k) + u.get(i, j + 1, k) + 
-            u.get(i, j, k - 1) + u.get(i, j, k + 1)
-        )
-    );
+            u_mat[front_idx] + u_mat[back_idx] + 
+            u_mat[left_idx] + u_mat[right_idx] + 
+            u_mat[down_idx] + u_mat[up_idx]
+        );
 
-    v.set(i, j, k,
-        -RA * DELTA / 12.0 * (t.get(i + 1, j, k) - t.get(i - 1, j, k)) + 
+    v_mat[idx] = 
+        -RA * DELTA / 12.0 * (t_mat[back_idx] - t_mat[front_idx]) + 
         (1.0 / 6.0) * (
-            v.get(i - 1, j, k) + v.get(i + 1, j, k) + 
-            v.get(i, j - 1, k) + v.get(i, j + 1, k) + 
-            v.get(i, j, k - 1) + v.get(i, j, k + 1)
-        )
-    );
+            v_mat[front_idx] + v_mat[back_idx] + 
+            v_mat[left_idx] + v_mat[right_idx] + 
+            v_mat[down_idx] + v_mat[up_idx]
+        );
 
-    t.set(i, j, k, 
+    t_mat[idx] =  
         (1.0 / 6.0) * (
-            t.get(i - 1, j, k) + t.get(i + 1, j, k) + 
-            t.get(i, j - 1, k) + t.get(i, j + 1, k) + 
-            t.get(i, j, k - 1) + t.get(i, j, k + 1)
-            + (DELTA * DELTA) - (1.0 / 4.0) * (
-                (u.get(i, j, k + 1) - u.get(i, j, k - 1)) * (t.get(i, j + 1, k) - t.get(i, j - 1, k)) -
-                (u.get(i, j + 1, k) - u.get(i, j - 1, k)) * (t.get(i, j, k + 1) - t.get(i, j, k - 1)) +
-                (v.get(i + 1, j, k) - v.get(i - 1, j, k)) * (t.get(i, j, k + 1) - t.get(i, j, k - 1)) -
-                (v.get(i, j, k + 1) - v.get(i, j, k - 1)) * (t.get(i + 1, j, k) - t.get(i - 1, j, k))
+            t_mat[front_idx] + t_mat[back_idx] + 
+            t_mat[left_idx] + t_mat[right_idx] + 
+            t_mat[down_idx] + t_mat[up_idx]
+            + DELTA2 - (1.0 / 4.0) * (
+                (u_mat[up_idx] - u_mat[down_idx]) * (t_mat[right_idx] - t_mat[left_idx]) -
+                (u_mat[right_idx] - u_mat[left_idx]) * (t_mat[up_idx] - t_mat[down_idx]) +
+                (v_mat[back_idx] - v_mat[front_idx]) * (t_mat[up_idx] - t_mat[down_idx]) -
+                (v_mat[up_idx] - v_mat[down_idx]) * (t_mat[back_idx] - t_mat[front_idx])
             )
-        )
-    );
+        );
 
-    double err_u = std::abs(u.get(i, j, k) - u_old);
-    double err_v = std::abs(v.get(i, j, k) - v_old);
-    double err_t = std::abs(t.get(i, j, k) - t_old);
+    double err_u = std::abs(u_mat[idx] - u_old);
+    double err_v = std::abs(v_mat[idx] - v_old);
+    double err_t = std::abs(t_mat[idx] - t_old);
     return errs {err_u, err_v, err_t};
 }
 
 int main(int argc, char* argv[]) {
+    auto start = std::chrono::high_resolution_clock::now();
+
     if (argc < 7) {
         printf("Usage: %s [u_mat_in] [v_mat_in] [t_mat_in] [u_out] [v_out] [t_out]\n", argv[0]);
         return 1;
     }
-
-    auto t1 = std::chrono::high_resolution_clock::now();
 
     std::string u_in = argv[1];
     std::string v_in = argv[2];
@@ -307,15 +325,11 @@ int main(int argc, char* argv[]) {
     std::string v_out = argv[5];
     std::string t_out = argv[6];
 
-    // omp_set_num_threads(N_THREADS);
-
     Matrix3D u(N1, N2, N3, true);
     Matrix3D v(N1, N2, N3, true);
     Matrix3D t(N1, N2, N3, true);
 
     // x = 0 is the HOT wall
-//#pragma omp parallel private(i, j, k) shared(local_A, local_B, local_C, block_len)
-    #pragma omp parallel for collapse(2)
     for (size_t j = 0; j < N2; j += 1) {
         for (size_t k = 0; k < N3; k++) {
             t.set(0, j, k, HOT_WALL_TEMP);
@@ -323,7 +337,6 @@ int main(int argc, char* argv[]) {
     } 
 
     // x = (N1-1) is the COLD wall
-    #pragma omp parallel for collapse(2)
     for (size_t j = 0; j < N2; j += 1) {
         for (size_t k = 0; k < N3; k++) {
             t.set(N1 - 1, j, k, COLD_WALL_TEMP);
@@ -337,6 +350,15 @@ int main(int argc, char* argv[]) {
     double err_v = 0;
     double err_t = 0;
 
+    // size_t SIZE = (u.dim_X - 2) * (u.dim_Y - 2) * (u.dim_Z - 2); // assuming that the matrices have equal size
+    // size_t SIZE_DIV_4 = SIZE / 4;
+    // size_t SIZE_DIV_4_MUL_4 = SIZE_DIV_4 * 4; // that moment you are paid per line of code
+    // size_t STRIDE = u.stride_X + u.stride_Y + 1; // stride on all directions
+    // errs errors;
+
+    const size_t STRIDE_X = u.stride_X;
+    const size_t STRIDE_Y = u.stride_Y;
+
     while (/*!stop &&*/ nr_it < MAX_IT) {
         if (nr_it % STEP == 0) {
             t.write_to_file(t_out + ".iter_" + std::to_string(nr_it) + ".bin");
@@ -345,12 +367,13 @@ int main(int argc, char* argv[]) {
         }
 
         nr_it += 1;
-    
-        #pragma omp parallel for collapse(2)
+
         for (size_t i = 1; i < N1 - 1; i++) {
+            const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t j_idx = j * STRIDE_Y;
                 for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
-                    errs errors = updateCells(u, v, t, i, j, k);
+                    errs errors = updateCells(u, v, t, i_idx + j_idx + k);
                     err_u = std::max(err_u, errors.err_u);
                     err_v = std::max(err_v, errors.err_v);
                     err_t = std::max(err_t, errors.err_t);
@@ -358,49 +381,98 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        #pragma omp parallel for collapse(2)
         for (size_t i = 1; i < N1 - 1; i++) {
+            const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t j_idx = j * STRIDE_Y;
                 for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
-                    errs errors = updateCells(u, v, t, i, j, k);
+                    errs errors = updateCells(u, v, t, i_idx + j_idx + k);
                     err_u = std::max(err_u, errors.err_u);
                     err_v = std::max(err_v, errors.err_v);
                     err_t = std::max(err_t, errors.err_t);
                 }
             }
         }
+
+        // // black checkerboard
+        // for (size_t i = 0; i < SIZE_DIV_4; i++) {
+        //     errors = updateCells(u, v, t, i * 4 + 1 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+
+        //     errors = updateCells(u, v, t, i * 4 + 2 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+        // }
+
+        // if (SIZE_DIV_4_MUL_4 == SIZE - 2) {
+        //     errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + 1 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+        // } else if (SIZE_DIV_4_MUL_4 < SIZE - 2) {
+        //     errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + 1 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+
+        //     errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + 2 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+        // }
+
+        // // white checkerboard
+        // for (size_t i = 0; i < SIZE_DIV_4; i++) {
+        //     errors = updateCells(u, v, t, i * 4 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+
+        //     errors = updateCells(u, v, t, i * 4 + 1 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+        // }
+
+        // if (SIZE_DIV_4_MUL_4 == SIZE - 1) {
+        //     errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+        // } else if (SIZE_DIV_4_MUL_4 < SIZE - 1) {
+        //     errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+
+        //     errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + 1 + STRIDE);
+        //     err_u = std::max(err_u, errors.err_u);
+        //     err_v = std::max(err_v, errors.err_v);
+        //     err_t = std::max(err_t, errors.err_t);
+        // }
 
         // adiabatic conditions
-
-        // y = 0 wall == y = 1 wall
-        #pragma omp parallel for collapse(2)
+        size_t yn1_idx = (N2 - 1) * STRIDE_Y;
+        size_t yn2_idx = (N2 - 2) * STRIDE_Y;
         for (size_t i = 0; i < N1; i++) {
+            size_t x_idx = i * STRIDE_X;
             for (size_t k = 0; k < N3; k++) {
-                t.set(i, 0, k, t.get(i, 1, k));
+                t.elems[x_idx + k] = t.elems[x_idx + STRIDE_Y + k];
+                t.elems[x_idx + yn1_idx + k] = t.elems[x_idx + yn2_idx + k];
             }
         }
 
-        // y = (N2 - 1) wall == y = (N2 - 2) wall
-        #pragma omp parallel for collapse(2)
+        size_t zn1_idx = N3 - 1;
+        size_t zn2_idx = N3 - 2;
         for (size_t i = 0; i < N1; i++) {
-            for (size_t k = 0; k < N3; k++) {
-                t.set(i, N2 - 1, k, t.get(i, N2 - 2, k));
-            }
-        }
-
-        // z = 0 wall == z = 1 wall
-        #pragma omp parallel for collapse(2)
-        for (size_t i = 0; i < N1; i++) {
+            size_t x_idx = i * STRIDE_X;
             for (size_t j = 0; j < N2; j++) {
-                t.set(i, j, 0, t.get(i, j, 1));
-            }
-        }
-
-        // z = (N3 - 1) wall == z = (N3 - 2) wall
-        #pragma omp parallel for collapse(2)
-        for (size_t i = 0; i < N1; i++) {
-            for (size_t j = 0; j < N2; j++) {
-                t.set(i, j, N3 - 1, t.get(i, j, N3 - 2));
+                size_t j_idx = j * STRIDE_Y;
+                t.elems[x_idx + j_idx] = t.elems[x_idx + j_idx + 1];
+                t.elems[x_idx + j_idx + zn1_idx] = t.elems[x_idx + j_idx + zn2_idx];
             }
         }
 
@@ -413,13 +485,13 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    printf("Iterations: %lu\n", nr_it);
-
     u.write_to_file(u_out);
     v.write_to_file(v_out);
     t.write_to_file(t_out);
 
-    auto t2 = std::chrono::high_resolution_clock::now();
-    auto total = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t2 - t1);
-    std::cout << "Total time taken: " << total.count() << " ms" << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> duration = end - start;
+
+    printf("Iterations: %lu\n", nr_it);
+    printf("Time: %.2fms\n", duration.count() * 1000);
 }
