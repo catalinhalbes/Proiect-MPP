@@ -4,26 +4,31 @@
 #include <cstdint>
 #include <string>
 
+#include <chrono>
+#include "omp.h"
+
 constexpr double RA = 500.0;
 constexpr double HEIGHT = 1.0;
 constexpr double MIN_DIFF = 1e-15;
 constexpr double COLD_WALL_TEMP = -1.0;
 constexpr double HOT_WALL_TEMP = 1.0;
 
-constexpr size_t MAX_IT = 100;
+constexpr size_t MAX_IT = 10000;
 // how often to output results in iterations
-constexpr size_t STEP = 10;
+constexpr size_t STEP = 20;
 
 constexpr size_t X_ASPECT_RATIO = 1;
 constexpr size_t Y_ASPECT_RATIO = 1;
 constexpr size_t Z_ASPECT_RATIO = 1;
 
-constexpr size_t N = 25;
+constexpr size_t N = 100;
 constexpr size_t N1 = N * X_ASPECT_RATIO;
 constexpr size_t N2 = N * Y_ASPECT_RATIO;
 constexpr size_t N3 = N * Z_ASPECT_RATIO;
 
 constexpr double DELTA = HEIGHT / (double) N;
+
+constexpr double N_THREADS = 16;
 
 class Matrix3D {
     public:
@@ -293,6 +298,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    auto t1 = std::chrono::high_resolution_clock::now();
+
     std::string u_in = argv[1];
     std::string v_in = argv[2];
     std::string t_in = argv[3];
@@ -300,11 +307,15 @@ int main(int argc, char* argv[]) {
     std::string v_out = argv[5];
     std::string t_out = argv[6];
 
+    omp_set_num_threads(N_THREADS);
+
     Matrix3D u(N1, N2, N3, true);
     Matrix3D v(N1, N2, N3, true);
     Matrix3D t(N1, N2, N3, true);
 
     // x = 0 is the HOT wall
+//#pragma omp parallel private(i, j, k) shared(local_A, local_B, local_C, block_len)
+    #pragma omp parallel for collapse(2)
     for (size_t j = 0; j < N2; j += 1) {
         for (size_t k = 0; k < N3; k++) {
             t.set(0, j, k, HOT_WALL_TEMP);
@@ -312,6 +323,7 @@ int main(int argc, char* argv[]) {
     } 
 
     // x = (N1-1) is the COLD wall
+    #pragma omp parallel for collapse(2)
     for (size_t j = 0; j < N2; j += 1) {
         for (size_t k = 0; k < N3; k++) {
             t.set(N1 - 1, j, k, COLD_WALL_TEMP);
@@ -333,7 +345,8 @@ int main(int argc, char* argv[]) {
         }
 
         nr_it += 1;
-
+    
+        #pragma omp parallel for collapse(2)
         for (size_t i = 1; i < N1 - 1; i++) {
             for (size_t j = 1; j < N2 - 1; j++) {
                 for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
@@ -345,6 +358,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        #pragma omp parallel for collapse(2)
         for (size_t i = 1; i < N1 - 1; i++) {
             for (size_t j = 1; j < N2 - 1; j++) {
                 for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
@@ -359,6 +373,7 @@ int main(int argc, char* argv[]) {
         // adiabatic conditions
 
         // y = 0 wall == y = 1 wall
+        #pragma omp parallel for collapse(2)
         for (size_t i = 0; i < N1; i++) {
             for (size_t k = 0; k < N3; k++) {
                 t.set(i, 0, k, t.get(i, 1, k));
@@ -366,6 +381,7 @@ int main(int argc, char* argv[]) {
         }
 
         // y = (N2 - 1) wall == y = (N2 - 2) wall
+        #pragma omp parallel for collapse(2)
         for (size_t i = 0; i < N1; i++) {
             for (size_t k = 0; k < N3; k++) {
                 t.set(i, N2 - 1, k, t.get(i, N2 - 2, k));
@@ -373,6 +389,7 @@ int main(int argc, char* argv[]) {
         }
 
         // z = 0 wall == z = 1 wall
+        #pragma omp parallel for collapse(2)
         for (size_t i = 0; i < N1; i++) {
             for (size_t j = 0; j < N2; j++) {
                 t.set(i, j, 0, t.get(i, j, 1));
@@ -380,6 +397,7 @@ int main(int argc, char* argv[]) {
         }
 
         // z = (N3 - 1) wall == z = (N3 - 2) wall
+        #pragma omp parallel for collapse(2)
         for (size_t i = 0; i < N1; i++) {
             for (size_t j = 0; j < N2; j++) {
                 t.set(i, j, N3 - 1, t.get(i, j, N3 - 2));
@@ -400,4 +418,8 @@ int main(int argc, char* argv[]) {
     u.write_to_file(u_out);
     v.write_to_file(v_out);
     t.write_to_file(t_out);
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+    auto total = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t2 - t1);
+    std::cout << "Total time taken: " << total.count() << " ms" << std::endl;
 }
