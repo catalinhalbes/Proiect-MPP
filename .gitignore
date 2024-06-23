@@ -6,3 +6,4 @@
 */figures*
 pdfs/
 venv/
+*/.vs
