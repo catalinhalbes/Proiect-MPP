@@ -6,23 +6,59 @@
 #include <chrono>
 #include <mpi.h>
 
+constexpr int U_TAG = 1;
+constexpr int V_TAG = 2;
+constexpr int T_TAG = 3;
+
 struct indices {
     size_t x, y, z;
 };
 
 class Matrix3D {
+    private:
+        void do_cleanup() {
+            if (elems == nullptr) {
+                return;
+            }
+
+            dim_X = dim_Y = dim_Z = 0;
+            delete[] elems;
+            delete[] up_down_recv_buf;
+            delete[] left_right_recv_buf;
+            delete[] back_front_recv_buf;
+            delete[] up_down_send_buf;
+            delete[] left_right_send_buf;
+            delete[] back_front_send_buf;
+            elems = nullptr;
+            up_down_recv_buf = nullptr;
+            left_right_recv_buf = nullptr;
+            back_front_recv_buf = nullptr;
+            up_down_send_buf = nullptr;
+            left_right_send_buf = nullptr;
+            back_front_send_buf = nullptr;
+        }
+
     public:
         double* elems;
+
         size_t original_dim_X, original_dim_Y, original_dim_Z;
         size_t original_stride_X, original_stride_Y;
 
-        // TODO: Make sure that the values below are used when computing the iterations
+        size_t actual_dim_X, actual_dim_Y, actual_dim_Z;
+
         size_t begin_X, begin_Y, begin_Z;
         size_t dim_X, dim_Y, dim_Z;
         size_t stride_X, stride_Y;
         size_t size;
 
         size_t rank;
+
+        int left_cell, right_cell, back_cell, front_cell, down_cell, up_cell;
+        MPI_Comm comm;
+
+        size_t up_down_size, left_right_size, back_front_size;
+        double *up_down_recv_buf, *left_right_recv_buf, *back_front_recv_buf;
+        double *up_down_send_buf, *left_right_send_buf, *back_front_send_buf;
     
         static inline void check_size(const Matrix3D& mat1, const Matrix3D& mat2) {
             if (
@@ -43,7 +79,22 @@ class Matrix3D {
             }
         }
 
-        Matrix3D(const std::string& filename, const indices& processes, const indices& process_idx) {
+        Matrix3D(
+            const std::string& filename, 
+            const indices& processes, const indices& process_idx, 
+            int left_cell, int right_cell, 
+            int back_cell, int front_cell, 
+            int down_cell, int up_cell, 
+            MPI_Comm comm
+        ) {
+            this->left_cell  = left_cell;
+            this->right_cell = right_cell;
+            this->back_cell  = back_cell;
+            this->front_cell = front_cell;
+            this->down_cell  = down_cell;
+            this->up_cell    = up_cell;
+            this->comm       = comm;
+            
             std::FILE* f = std::fopen(filename.c_str(), "rb");
             if (f == nullptr) {
                 throw std::runtime_error("Unable to open file: " + filename);
@@ -58,38 +109,55 @@ class Matrix3D {
             original_stride_X = original_dim_Y * original_dim_Z;
             original_stride_Y = original_dim_Z;
 
-            size_t dim_div_proc_x = original_dim_X / processes.x;
-            size_t dim_div_proc_y = original_dim_Y / processes.y;
-            size_t dim_div_proc_z = original_dim_Z / processes.z;
+            size_t dim_div_proc_x = (original_dim_X - 2) / processes.x;
+            size_t dim_div_proc_y = (original_dim_Y - 2) / processes.y;
+            size_t dim_div_proc_z = (original_dim_Z - 2) / processes.z;
 
-            size_t dim_mod_proc_x = original_dim_X % processes.x;
-            size_t dim_mod_proc_y = original_dim_Y % processes.y;
-            size_t dim_mod_proc_z = original_dim_Z % processes.z;
+            size_t dim_mod_proc_x = (original_dim_X - 2) % processes.x;
+            size_t dim_mod_proc_y = (original_dim_Y - 2) % processes.y;
+            size_t dim_mod_proc_z = (original_dim_Z - 2) % processes.z;
 
             // to find the size divide with the number of processes on the given axis and add 1 if the remainder is greater than the index of the current process
-            dim_X = dim_div_proc_x + (dim_mod_proc_x > process_idx.x); 
-            dim_Y = dim_div_proc_y + (dim_mod_proc_y > process_idx.y); 
-            dim_Z = dim_div_proc_z + (dim_mod_proc_z > process_idx.z); 
+            // dimension includes the size of the shared borders
+            actual_dim_X = dim_div_proc_x + (dim_mod_proc_x > process_idx.x); 
+            actual_dim_Y = dim_div_proc_y + (dim_mod_proc_y > process_idx.y); 
+            actual_dim_Z = dim_div_proc_z + (dim_mod_proc_z > process_idx.z); 
+
+            dim_X = actual_dim_X + 2;
+            dim_Y = actual_dim_Y + 2;
+            dim_Z = actual_dim_Z + 2;
+
+            up_down_size    = actual_dim_X * actual_dim_Y;
+            left_right_size = actual_dim_Y * actual_dim_Z;
+            back_front_size = actual_dim_X * actual_dim_Z;
+
+            up_down_recv_buf    = new double[up_down_size];
+            left_right_recv_buf = new double[left_right_size];
+            back_front_recv_buf = new double[back_front_size];
+
+            up_down_send_buf    = new double[up_down_size];
+            left_right_send_buf = new double[left_right_size];
+            back_front_send_buf = new double[back_front_size];
 
             stride_X = dim_Y * dim_Z;
             stride_Y = dim_Z;
-
             size = dim_X * dim_Y * dim_Z;
 
             elems = new double[size];
 
             // to find the begin offset fins the size of all block before
+            // begin starts from the shared borders
             begin_X = dim_div_proc_x * process_idx.x + (dim_mod_proc_x - 1 > process_idx.x? dim_mod_proc_x: process_idx.x);
             begin_Y = dim_div_proc_y * process_idx.y + (dim_mod_proc_y - 1 > process_idx.y? dim_mod_proc_y: process_idx.y);
             begin_Z = dim_div_proc_z * process_idx.z + (dim_mod_proc_z - 1 > process_idx.z? dim_mod_proc_z: process_idx.z);
 
-            printf("[%lu] beginX=%lu x=%lu beginY=%lu y=%lu beginZ=%lu z=%lu\n", rank, begin_X, dim_X, begin_Y, dim_Y, begin_Z, dim_Z);
+            printf("[%lu] beginX=%lu x=%lu beginY=%lu y=%lu beginZ=%lu z=%lu ud=%lu lr=%lu bf=%lu\n", rank, begin_X, dim_X, begin_Y, dim_Y, begin_Z, dim_Z, up_down_size, left_right_size, back_front_size);
 
             for (size_t i = 0; i < dim_X; i++) {
                 for (size_t j = 0; j < dim_Y; j++) {
                     if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z), SEEK_SET) != 0) {
                         fclose(f);
-                        delete[] elems;
+                        do_cleanup();
                         throw std::runtime_error(
                             "[" + std::to_string(rank) + "] Could not fseek for read in '" + filename + 
                             "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
@@ -98,7 +166,7 @@ class Matrix3D {
 
                     if (fread(&(elems[i * stride_X + j * stride_Y]), sizeof(double), dim_Z, f) != dim_Z) {
                         fclose(f);
-                        delete[] elems;
+                        do_cleanup();
                         throw std::runtime_error(
                             "[" + std::to_string(rank) + "] Could not read all elements from '" + filename + 
                             "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
@@ -111,13 +179,7 @@ class Matrix3D {
         }
 
         virtual ~Matrix3D() {
-            if (elems == nullptr) {
-                return;
-            }
-
-            dim_X = dim_Y = dim_Z = 0;
-            delete[] elems;
-            elems = nullptr;
+            do_cleanup();
         }
 
         void write_in_file(const std::string& filename) {
@@ -146,6 +208,155 @@ class Matrix3D {
                     }
                 }
             }
+
+            // for (size_t i = 1; i < dim_X - 1; i++) {
+            //     for (size_t j = 1; j < dim_Y - 1; j++) {
+            //         if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z + 1), SEEK_SET) != 0) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
+            //                 "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+
+            //         if (fwrite(&(elems[i * stride_X + j * stride_Y + 1]), sizeof(double), actual_dim_Z, f) != actual_dim_Z) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
+            //                 "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+            //     }
+            // }
+
+            // // TODO: update the throw message to better reflect the actual position and state of the program
+
+            // if (down_cell < 0) { // write z = 0 wall
+            //     for (size_t i = 0 + (left_cell >= 0); i < dim_X - 1 - (right_cell >= 0); i++) {
+            //         for (size_t j = 0 + (back_cell >= 0); j < dim_Y - 1 - (front_cell >= 0); j++) {
+            //             if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z), SEEK_SET) != 0) {
+            //                 fclose(f);
+            //                 throw std::runtime_error(
+            //                     "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
+            //                     "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //                 );
+            //             }
+
+            //             if (fwrite(&(elems[i * stride_X + j * stride_Y]), sizeof(double), 1, f) != 1) {
+            //                 fclose(f);
+            //                 throw std::runtime_error(
+            //                     "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
+            //                     "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //                 );
+            //             }
+            //         }
+            //     }
+            // }
+            // if (up_cell < 0) { // write z = dim - 1 wall
+            //     for (size_t i = 0 + (left_cell >= 0); i < dim_X - 1 - (right_cell >= 0); i++) {
+            //         for (size_t j = 0 + (back_cell >= 0); j < dim_Y - 1 - (front_cell >= 0); j++) {
+            //             if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z + dim_Z - 1), SEEK_SET) != 0) {
+            //                 fclose(f);
+            //                 throw std::runtime_error(
+            //                     "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
+            //                     "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //                 );
+            //             }
+
+            //             if (fwrite(&(elems[i * stride_X + j * stride_Y + dim_Z - 1]), sizeof(double), 1, f) != 1) {
+            //                 fclose(f);
+            //                 throw std::runtime_error(
+            //                     "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
+            //                     "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //                 );
+            //             }
+            //         }
+            //     }
+            // }
+            // if (left_cell < 0) { // write x = 0 wall
+            //     int k = (int)(down_cell >= 0);
+            //     int current_dim_z = dim_Z - k - (up_cell >= 0);
+            //     for (size_t j = 0 + (back_cell >= 0); j < dim_Y - 1 - (front_cell >= 0); j++) {
+            //         if (fseek(f, 8 * (3 + begin_X * original_stride_X + (j + begin_Y) * original_stride_Y + k + begin_Z), SEEK_SET) != 0) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
+            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+
+            //         if (fwrite(&(elems[j * stride_Y + k]), sizeof(double), current_dim_z, f) != (size_t)current_dim_z) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
+            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+            //     }
+            // }
+            // if (right_cell < 0) { // write x = dim - 1 wall
+            //     int k = (int)(down_cell >= 0);
+            //     int current_dim_z = dim_Z - k - (up_cell >= 0);
+            //     for (size_t j = 0 + (back_cell >= 0); j < dim_Y - 1 - (front_cell >= 0); j++) {
+            //         if (fseek(f, 8 * (3 + (dim_X - 1 + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + k + begin_Z), SEEK_SET) != 0) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
+            //                 "' loc (" + std::to_string(dim_X - 1 + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+
+            //         if (fwrite(&(elems[(dim_X - 1) * stride_X + j * stride_Y + k]), sizeof(double), current_dim_z, f) != (size_t)current_dim_z) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
+            //                 "' loc (" + std::to_string(dim_X - 1 + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+            //     }
+            // }
+            // if (back_cell < 0) { // write y = 0 wall
+            //     int k = (int)(down_cell >= 0);
+            //     int current_dim_z = dim_Z - k - (up_cell >= 0);
+            //     for (size_t i = 0 + (left_cell >= 0); i < dim_X - 1 - (right_cell >= 0); i++) {
+            //         if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + begin_Y * original_stride_Y + k + begin_Z), SEEK_SET) != 0) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
+            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+
+            //         if (fwrite(&(elems[i * stride_X + k]), sizeof(double), current_dim_z, f) != (size_t)current_dim_z) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
+            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+            //     }
+            // }
+            // if (front_cell < 0) { // write y = dim - 1 wall
+            //     int k = (int)(down_cell >= 0);
+            //     int current_dim_z = dim_Z - k - (up_cell >= 0);
+            //     for (size_t i = 0 + (left_cell >= 0); i < dim_X - 1 - (right_cell >= 0); i++) {
+            //         if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (dim_Y - 1 + begin_Y) * original_stride_Y + k + begin_Z), SEEK_SET) != 0) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
+            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(dim_Y - 1 + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+
+            //         if (fwrite(&(elems[i * stride_X + (dim_Y - 1) * stride_Y + k]), sizeof(double), current_dim_z, f) != (size_t)current_dim_z) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
+            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+            //     }
+            // }
             std::fclose(f);
         }
 
@@ -159,7 +370,7 @@ class Matrix3D {
                 throw std::runtime_error("Unable to create file: " + filename);
             }
 
-            size_t s = dim_X * dim_Y * dim_Z * 8 + 3 * 8;
+            size_t s = original_dim_X * original_dim_Y * original_dim_Z * 8 + 3 * 8;
 
             std::fwrite(&original_dim_X, sizeof(size_t), 1, f);
             std::fwrite(&original_dim_Y, sizeof(size_t), 1, f);
@@ -176,6 +387,149 @@ class Matrix3D {
             }
 
             fclose(f);
+        }
+
+        void communicate(int tag) {
+            // TODO: don't do copy if the process is at an edge
+            // TODO: precompute the offsets that transform the actual coord to local total coords
+
+            // z = 0 face (down)
+            if (down_cell >= 0) {
+                for (size_t i = 0; i < actual_dim_X; i++) {
+                    for (size_t j = 0; j < actual_dim_Y; j++) {
+                        up_down_send_buf[i * actual_dim_Y + j] = elems[(i + 1) * stride_X + (j + 1) * stride_Y + 1];
+                    }
+                }
+            }
+
+            MPI_Sendrecv(
+                up_down_send_buf, up_down_size, MPI_DOUBLE, down_cell, tag, // send
+                up_down_recv_buf, up_down_size, MPI_DOUBLE, up_cell, tag,   // receive
+                comm, MPI_STATUS_IGNORE
+            );
+
+            if (up_cell >= 0) {
+                for (size_t i = 0; i < actual_dim_X; i++) {
+                    for (size_t j = 0; j < actual_dim_Y; j++) {
+                        elems[(i + 1) * stride_X + (j + 1) * stride_Y + dim_Z - 1] = up_down_recv_buf[i * actual_dim_Y + j];
+                    }
+                }
+            }
+
+            // z = dim - 1 face (up)
+            if (up_cell >= 0) {
+                for (size_t i = 0; i < actual_dim_X; i++) {
+                    for (size_t j = 0; j < actual_dim_Y; j++) {
+                        up_down_send_buf[i * actual_dim_Y + j] = elems[(i + 1) * stride_X + (j + 1) * stride_Y + dim_Z - 2];
+                    }
+                }
+            }
+
+            MPI_Sendrecv(
+                up_down_send_buf, up_down_size, MPI_DOUBLE, up_cell, tag,   // send
+                up_down_recv_buf, up_down_size, MPI_DOUBLE, down_cell, tag, // receive
+                comm, MPI_STATUS_IGNORE
+            );
+
+            if (down_cell >= 0) {
+                for (size_t i = 0; i < actual_dim_X; i++) {
+                    for (size_t j = 0; j < actual_dim_Y; j++) {
+                        elems[(i + 1) * stride_X + (j + 1) * stride_Y] = up_down_recv_buf[i * actual_dim_Y + j];
+                    }
+                }
+            }
+
+            // x = 0 face (left)
+            if (left_cell >= 0) {
+                for (size_t j = 0; j < actual_dim_Y; j++) {
+                    for (size_t k = 0; k < actual_dim_Z; k++) {
+                        left_right_send_buf[j * actual_dim_Z + k] = elems[stride_X + (j + 1) * stride_Y + k + 1];
+                    }
+                }
+            }
+
+            MPI_Sendrecv(
+                left_right_send_buf, left_right_size, MPI_DOUBLE, left_cell, tag,  // send
+                left_right_recv_buf, left_right_size, MPI_DOUBLE, right_cell, tag, // receive
+                comm, MPI_STATUS_IGNORE
+            );
+
+            if (right_cell >= 0) {
+                for (size_t j = 0; j < actual_dim_Y; j++) {
+                    for (size_t k = 0; k < actual_dim_Z; k++) {
+                        elems[(dim_X - 1) * stride_X + (j + 1) * stride_Y + k + 1] = left_right_recv_buf[j * actual_dim_Z + k];
+                    }
+                }
+            }
+
+            // x = dim - 1 face (right)
+            if (right_cell >= 0) {
+                for (size_t j = 0; j < actual_dim_Y; j++) {
+                    for (size_t k = 0; k < actual_dim_Z; k++) {
+                        left_right_send_buf[j * actual_dim_Z + k] = elems[(dim_X - 2) * stride_X + (j + 1) * stride_Y + k + 1];
+                    }
+                }
+            }
+
+            MPI_Sendrecv(
+                left_right_send_buf, left_right_size, MPI_DOUBLE, right_cell, tag, // send
+                left_right_recv_buf, left_right_size, MPI_DOUBLE, left_cell, tag,  // receive
+                comm, MPI_STATUS_IGNORE
+            );
+
+            if (left_cell >= 0) {
+                for (size_t j = 0; j < actual_dim_Y; j++) {
+                    for (size_t k = 0; k < actual_dim_Z; k++) {
+                        elems[(j + 1) * stride_Y + k + 1] = left_right_recv_buf[j * actual_dim_Z + k];
+                    }
+                }
+            }
+
+            // y = 0 face (back)
+            if (back_cell >= 0) {
+                for (size_t i = 0; i < actual_dim_X; i++) {
+                    for (size_t k = 0; k < actual_dim_Z; k++) {
+                        back_front_send_buf[i * actual_dim_Z + k] = elems[(i + 1) * stride_X + stride_Y + k + 1];
+                    }
+                }
+            }
+
+            MPI_Sendrecv(
+                back_front_send_buf, back_front_size, MPI_DOUBLE, back_cell, tag,  // send
+                back_front_recv_buf, back_front_size, MPI_DOUBLE, front_cell, tag, // receive
+                comm, MPI_STATUS_IGNORE
+            );
+
+            if (front_cell >= 0) {
+                for (size_t i = 0; i < actual_dim_X; i++) {
+                    for (size_t k = 0; k < actual_dim_Z; k++) {
+                        elems[(i + 1) * stride_X + (dim_Y - 1) * stride_Y + k + 1] = back_front_recv_buf[i * actual_dim_Z + k];
+                    }
+                }
+            }
+
+            // y = dim - 1 face (front)
+            if (front_cell >= 0) {
+                for (size_t i = 0; i < actual_dim_X; i++) {
+                    for (size_t k = 0; k < actual_dim_Z; k++) {
+                        back_front_send_buf[i * actual_dim_Z + k] = elems[(i + 1) * stride_X + (dim_Y - 2) * stride_Y + k + 1];
+                    }
+                }
+            }
+
+            MPI_Sendrecv(
+                back_front_send_buf, back_front_size, MPI_DOUBLE, front_cell, tag, // send
+                back_front_recv_buf, back_front_size, MPI_DOUBLE, back_cell, tag,  // receive
+                comm, MPI_STATUS_IGNORE
+            );
+
+            if (back_cell >= 0) {
+                for (size_t i = 0; i < actual_dim_X; i++) {
+                    for (size_t k = 0; k < actual_dim_Z; k++) {
+                        elems[(i + 1) * stride_X + k + 1] = back_front_recv_buf[i * actual_dim_Z + k];
+                    }
+                }
+            }
         }
 };
 
@@ -295,8 +649,8 @@ int main(int argc, char* argv[]) {
 
     // avoid warnings
     const size_t Cx = (size_t) Cx_aux;
-    const size_t Cy = (size_t) Cx_aux;
-    const size_t Cz = (size_t) Cx_aux;
+    const size_t Cy = (size_t) Cy_aux;
+    const size_t Cz = (size_t) Cz_aux;
     const size_t P  = Cx * Cy * Cz;
 
     const std::string u_in    = argv[9];
@@ -327,14 +681,14 @@ int main(int argc, char* argv[]) {
     // create grid
 	int dim_sizes[3] = { (int)Cx, (int)Cy, (int)Cz };
 	int wrap_around[3] = { 0, 0, 0 };
-	MPI_Comm MPI_COMM_GRID;
-	MPI_Cart_create(MPI_COMM_WORLD, 3, dim_sizes, wrap_around, 0, &MPI_COMM_GRID);
+	MPI_Comm mpi_comm_grid;
+	MPI_Cart_create(MPI_COMM_WORLD, 3, dim_sizes, wrap_around, 0, &mpi_comm_grid);
 
 	// get coords
 	int coords[3];
 	int grid_rank;
-	MPI_Comm_rank(MPI_COMM_GRID, &grid_rank);
-	MPI_Cart_coords(MPI_COMM_GRID, grid_rank, 3, coords);
+	MPI_Comm_rank(mpi_comm_grid, &grid_rank);
+	MPI_Cart_coords(mpi_comm_grid, grid_rank, 3, coords);
 	size_t cx = (size_t)coords[0];
 	size_t cy = (size_t)coords[1];
 	size_t cz = (size_t)coords[2];
@@ -346,13 +700,24 @@ int main(int argc, char* argv[]) {
     // down  = Z - 1
     // up    = Z + 1
 	int left_cell, right_cell, back_cell, front_cell, down_cell, up_cell;
-	MPI_Cart_shift(MPI_COMM_GRID, 0, 1, &left_cell, &right_cell);
-	MPI_Cart_shift(MPI_COMM_GRID, 1, 1, &back_cell, &front_cell);
-	MPI_Cart_shift(MPI_COMM_GRID, 2, 1, &down_cell, &up_cell);
+	MPI_Cart_shift(mpi_comm_grid, 0, 1, &left_cell, &right_cell);
+	MPI_Cart_shift(mpi_comm_grid, 1, 1, &back_cell, &front_cell);
+	MPI_Cart_shift(mpi_comm_grid, 2, 1, &down_cell, &up_cell);
 
-    Matrix3D u(u_in, {Cx, Cy, Cz}, {cx, cy, cz});
-    Matrix3D v(v_in, {Cx, Cy, Cz}, {cx, cy, cz});
-    Matrix3D t(t_in, {Cx, Cy, Cz}, {cx, cy, cz});
+    // 3D Cartesian coordinates
+	std::cout << "Rank:" << rank << "\n"
+		<< "Coords: (" << cx << ", " << cy << ", " << cz << ")" << std::endl;
+
+    // neighbors
+	std::cout << "Rank: " << rank << "\n"
+		<< "Left: " << left_cell << "; Right: " << right_cell << "\n"
+		<< "Back: " << back_cell << "; Front: " << front_cell << "\n"
+		<< "Down: " << down_cell << "; Up: " << up_cell << "\n"
+		<< std::endl;
+
+    Matrix3D u(u_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
+    Matrix3D v(v_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
+    Matrix3D t(t_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
 
     Matrix3D::check_size(u, v);
     Matrix3D::check_size(u, t);
@@ -361,90 +726,139 @@ int main(int argc, char* argv[]) {
     const size_t N2 = u.dim_Y;
     const size_t N3 = u.dim_Z;
 
-    const double DELTA = HEIGHT / (double) N3;
+    const double DELTA = HEIGHT / (double) u.original_dim_Z;
 
     const size_t STRIDE_X = u.stride_X;
     const size_t STRIDE_Y = u.stride_Y;
 
     int64_t nr_it = 0;
 
-    // while (nr_it < MAX_IT) {
-    //     double err_u = 0;
-    //     double err_v = 0;
-    //     double err_t = 0;
+    while (nr_it < MAX_IT) {
+        double err_u = 0;
+        double err_v = 0;
+        double err_t = 0;
 
-    //     if (DO_STEP && nr_it % STEP == 0) {
-    //         const std::string t_file = t_out + "_iter_" + std::to_string(nr_it) + ".bin";
-    //         const std::string u_file = u_out + "_iter_" + std::to_string(nr_it) + ".bin";
-    //         const std::string v_file = v_out + "_iter_" + std::to_string(nr_it) + ".bin";
+        nr_it += 1;
 
-    //         if (rank == 0) {
-    //             t.create_matrix_file_preallocated(t_file);
-    //             u.create_matrix_file_preallocated(u_file);
-    //             v.create_matrix_file_preallocated(v_file);
-    //         }
-    //         MPI_Barrier(MPI_COMM_GRID);
-    //         t.write_in_file(t_file);
-    //         u.write_in_file(u_file);
-    //         v.write_in_file(v_file);
-    //     }
+        if (DO_STEP && nr_it % STEP == 0) {
+            const std::string t_file = t_out + "_iter_" + std::to_string(nr_it) + ".bin";
+            const std::string u_file = u_out + "_iter_" + std::to_string(nr_it) + ".bin";
+            const std::string v_file = v_out + "_iter_" + std::to_string(nr_it) + ".bin";
 
-    //     nr_it += 1;
+            if (rank == 0) {
+                t.create_matrix_file_preallocated(t_file);
+                u.create_matrix_file_preallocated(u_file);
+                v.create_matrix_file_preallocated(v_file);
+            }
+            MPI_Barrier(mpi_comm_grid);
+            t.write_in_file(t_file);
+            u.write_in_file(u_file);
+            v.write_in_file(v_file);
+        }
 
-    //     for (size_t i = 1; i < N1 - 1; i++) {
-    //         const size_t i_idx = i * STRIDE_X;
-    //         for (size_t j = 1; j < N2 - 1; j++) {
-    //             const size_t j_idx = j * STRIDE_Y;
-    //             for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
-    //                 errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
-    //                 err_u = std::max(err_u, errors.err_u);
-    //                 err_v = std::max(err_v, errors.err_v);
-    //                 err_t = std::max(err_t, errors.err_t);
-    //             }
-    //         }
-    //     }
+        // communicate
+        if (nr_it > 1) {
+            u.communicate(U_TAG);
+            v.communicate(V_TAG);
+            t.communicate(T_TAG);
+        }
 
-    //     for (size_t i = 1; i < N1 - 1; i++) {
-    //         const size_t i_idx = i * STRIDE_X;
-    //         for (size_t j = 1; j < N2 - 1; j++) {
-    //             const size_t j_idx = j * STRIDE_Y;
-    //             for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
-    //                 errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
-    //                 err_u = std::max(err_u, errors.err_u);
-    //                 err_v = std::max(err_v, errors.err_v);
-    //                 err_t = std::max(err_t, errors.err_t);
-    //             }
-    //         }
-    //     }
+        for (size_t i = 1; i < N1 - 1; i++) {
+            const size_t i_idx = i * STRIDE_X;
+            for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t j_idx = j * STRIDE_Y;
+                for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
+                    errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
+                    err_u = std::max(err_u, errors.err_u);
+                    err_v = std::max(err_v, errors.err_v);
+                    err_t = std::max(err_t, errors.err_t);
+                }
+            }
+        }
 
-    //     // adiabatic conditions
-    //     size_t yn1_idx = (N2 - 1) * STRIDE_Y;
-    //     size_t yn2_idx = (N2 - 2) * STRIDE_Y;
-    //     for (size_t i = 0; i < N1; i++) {
-    //         size_t x_idx = i * STRIDE_X;
-    //         for (size_t k = 0; k < N3; k++) {
-    //             t.elems[x_idx + k] = t.elems[x_idx + STRIDE_Y + k];
-    //             t.elems[x_idx + yn1_idx + k] = t.elems[x_idx + yn2_idx + k];
-    //         }
-    //     }
+        // communicate
+        u.communicate(U_TAG);
+        v.communicate(V_TAG);
+        t.communicate(T_TAG);
 
-    //     size_t zn1_idx = N3 - 1;
-    //     size_t zn2_idx = N3 - 2;
-    //     for (size_t i = 0; i < N1; i++) {
-    //         size_t x_idx = i * STRIDE_X;
-    //         for (size_t j = 0; j < N2; j++) {
-    //             size_t j_idx = j * STRIDE_Y;
-    //             t.elems[x_idx + j_idx] = t.elems[x_idx + j_idx + 1];
-    //             t.elems[x_idx + j_idx + zn1_idx] = t.elems[x_idx + j_idx + zn2_idx];
-    //         }
-    //     }
+        for (size_t i = 1; i < N1 - 1; i++) {
+            const size_t i_idx = i * STRIDE_X;
+            for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t j_idx = j * STRIDE_Y;
+                for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
+                    errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
+                    err_u = std::max(err_u, errors.err_u);
+                    err_v = std::max(err_v, errors.err_v);
+                    err_t = std::max(err_t, errors.err_t);
+                }
+            }
+        }
 
-    //     if (USE_DIFF &&
-    //         err_u < MIN_DIFF &&
-    //         err_v < MIN_DIFF &&
-    //         err_t < MIN_DIFF
-    //     ) { break; }
-    // }
+        // adiabatic conditions
+        size_t yn1_idx = (N2 - 1) * STRIDE_Y;
+        size_t yn2_idx = (N2 - 2) * STRIDE_Y;
+
+        if (back_cell < 0) { // no neighbor y = 0
+            for (size_t i = 0; i < N1; i++) {
+                size_t x_idx = i * STRIDE_X;
+                for (size_t k = 0; k < N3; k++) {
+                    t.elems[x_idx + k] = t.elems[x_idx + STRIDE_Y + k];
+                }
+            }
+        }
+
+        if (front_cell < 0) { // no neighbor y = dim - 1
+            for (size_t i = 0; i < N1; i++) {
+                size_t x_idx = i * STRIDE_X;
+                for (size_t k = 0; k < N3; k++) {
+                    t.elems[x_idx + yn1_idx + k] = t.elems[x_idx + yn2_idx + k];
+                }
+            }
+        }
+
+        size_t zn1_idx = N3 - 1;
+        size_t zn2_idx = N3 - 2;
+
+        if (down_cell < 0) { // no neighbor
+            for (size_t i = 0; i < N1; i++) {
+                size_t x_idx = i * STRIDE_X;
+                for (size_t j = 0; j < N2; j++) {
+                    size_t j_idx = j * STRIDE_Y;
+                    t.elems[x_idx + j_idx] = t.elems[x_idx + j_idx + 1];
+                }
+            }
+        }
+
+        if (up_cell < 0) { // no neighbor
+            for (size_t i = 0; i < N1; i++) {
+                size_t x_idx = i * STRIDE_X;
+                for (size_t j = 0; j < N2; j++) {
+                    size_t j_idx = j * STRIDE_Y;
+                    t.elems[x_idx + j_idx + zn1_idx] = t.elems[x_idx + j_idx + zn2_idx];
+                }
+            }
+        }
+
+        if (USE_DIFF &&
+            err_u < MIN_DIFF &&
+            err_v < MIN_DIFF &&
+            err_t < MIN_DIFF
+        ) { 
+            // current process should stop
+            // use gather to send message to stop
+
+            // receive broadcast
+            // depending on the broadcast continue or not
+            break; 
+        } 
+        else {
+            // current process wants to continue
+            // use gather to send message to continue
+
+            // receive broadcast
+            // stop if early if receiving stop
+        }
+    }
 
     const std::string t_file = t_out + "_iter_" + std::to_string(nr_it) + ".bin";
     const std::string u_file = u_out + "_iter_" + std::to_string(nr_it) + ".bin";
@@ -455,7 +869,7 @@ int main(int argc, char* argv[]) {
         u.create_matrix_file_preallocated(u_file);
         v.create_matrix_file_preallocated(v_file);
     }
-    MPI_Barrier(MPI_COMM_GRID);
+    MPI_Barrier(mpi_comm_grid);
     t.write_in_file(t_file);
     u.write_in_file(u_file);
     v.write_in_file(v_file);
