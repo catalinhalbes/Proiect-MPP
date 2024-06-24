@@ -13,8 +13,8 @@ struct indices {
 class Matrix3D {
     public:
         double* elems;
-        size_t dim_X, dim_Y, dim_Z;
-        size_t stride_X, stride_Y;
+        size_t original_dim_X, original_dim_Y, original_dim_Z;
+        size_t original_stride_X, original_stride_Y;
 
         // TODO: Make sure that the values below are used when computing the iterations
         size_t begin_X, begin_Y, begin_Z;
@@ -51,20 +51,20 @@ class Matrix3D {
 
             rank = process_idx.x * (processes.y + processes.z) + process_idx.y * processes.z + process_idx.z;
 
-            std::fread(&dim_X, sizeof(size_t), 1, f);
-            std::fread(&dim_Y, sizeof(size_t), 1, f);
-            std::fread(&dim_Z, sizeof(size_t), 1, f);
+            std::fread(&original_dim_X, sizeof(size_t), 1, f);
+            std::fread(&original_dim_Y, sizeof(size_t), 1, f);
+            std::fread(&original_dim_Z, sizeof(size_t), 1, f);
 
-            stride_X = dim_Y * dim_Z;
-            stride_Y = dim_Z;
+            original_stride_X = original_dim_Y * original_dim_Z;
+            original_stride_Y = original_dim_Z;
 
-            size_t dim_div_proc_x = dim_X / processes.x;
-            size_t dim_div_proc_y = dim_Y / processes.y;
-            size_t dim_div_proc_z = dim_Z / processes.z;
+            size_t dim_div_proc_x = original_dim_X / processes.x;
+            size_t dim_div_proc_y = original_dim_Y / processes.y;
+            size_t dim_div_proc_z = original_dim_Z / processes.z;
 
-            size_t dim_mod_proc_x = dim_X % processes.x;
-            size_t dim_mod_proc_y = dim_Y % processes.y;
-            size_t dim_mod_proc_z = dim_Z % processes.z;
+            size_t dim_mod_proc_x = original_dim_X % processes.x;
+            size_t dim_mod_proc_y = original_dim_Y % processes.y;
+            size_t dim_mod_proc_z = original_dim_Z % processes.z;
 
             // to find the size divide with the number of processes on the given axis and add 1 if the remainder is greater than the index of the current process
             dim_X = dim_div_proc_x + (dim_mod_proc_x > process_idx.x); 
@@ -87,7 +87,7 @@ class Matrix3D {
 
             for (size_t i = 0; i < dim_X; i++) {
                 for (size_t j = 0; j < dim_Y; j++) {
-                    if (fseek(f, 8 * (3 + (i + begin_X) * stride_X + (j + begin_Y) * stride_Y + begin_Z), SEEK_SET) != 0) {
+                    if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z), SEEK_SET) != 0) {
                         fclose(f);
                         delete[] elems;
                         throw std::runtime_error(
@@ -129,7 +129,7 @@ class Matrix3D {
 
             for (size_t i = 0; i < dim_X; i++) {
                 for (size_t j = 0; j < dim_Y; j++) {
-                    if (fseek(f, 8 * (3 + (i + begin_X) * stride_X + (j + begin_Y) * stride_Y + begin_Z), SEEK_SET) != 0) {
+                    if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z), SEEK_SET) != 0) {
                         fclose(f);
                         throw std::runtime_error(
                             "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
@@ -161,9 +161,9 @@ class Matrix3D {
 
             size_t s = dim_X * dim_Y * dim_Z * 8 + 3 * 8;
 
-            std::fwrite(&dim_X, sizeof(size_t), 1, f);
-            std::fwrite(&dim_Y, sizeof(size_t), 1, f);
-            std::fwrite(&dim_Z, sizeof(size_t), 1, f);
+            std::fwrite(&original_dim_X, sizeof(size_t), 1, f);
+            std::fwrite(&original_dim_Y, sizeof(size_t), 1, f);
+            std::fwrite(&original_dim_Z, sizeof(size_t), 1, f);
 
             if (fseek(f, s - 1, SEEK_SET) != 0) {
                 fclose(f);
