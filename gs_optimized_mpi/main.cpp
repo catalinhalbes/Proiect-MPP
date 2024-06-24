@@ -119,13 +119,19 @@ class Matrix3D {
 
             // to find the size divide with the number of processes on the given axis and add 1 if the remainder is greater than the index of the current process
             // dimension includes the size of the shared borders
-            actual_dim_X = dim_div_proc_x + (dim_mod_proc_x > process_idx.x); 
-            actual_dim_Y = dim_div_proc_y + (dim_mod_proc_y > process_idx.y); 
-            actual_dim_Z = dim_div_proc_z + (dim_mod_proc_z > process_idx.z); 
+            actual_dim_X = dim_div_proc_x + (process_idx.x < dim_mod_proc_x); 
+            actual_dim_Y = dim_div_proc_y + (process_idx.y < dim_mod_proc_y); 
+            actual_dim_Z = dim_div_proc_z + (process_idx.z < dim_mod_proc_z); 
 
             dim_X = actual_dim_X + 2;
             dim_Y = actual_dim_Y + 2;
             dim_Z = actual_dim_Z + 2;
+
+            // to find the begin offset fins the size of all block before
+            // begin starts from the shared borders
+            begin_X = dim_div_proc_x * process_idx.x + std::min(dim_mod_proc_x, process_idx.x);
+            begin_Y = dim_div_proc_y * process_idx.y + std::min(dim_mod_proc_y, process_idx.y);
+            begin_Z = dim_div_proc_z * process_idx.z + std::min(dim_mod_proc_z, process_idx.z);
 
             up_down_size    = actual_dim_X * actual_dim_Y;
             left_right_size = actual_dim_Y * actual_dim_Z;
@@ -144,12 +150,6 @@ class Matrix3D {
             size = dim_X * dim_Y * dim_Z;
 
             elems = new double[size];
-
-            // to find the begin offset fins the size of all block before
-            // begin starts from the shared borders
-            begin_X = dim_div_proc_x * process_idx.x + (dim_mod_proc_x - 1 > process_idx.x? dim_mod_proc_x: process_idx.x);
-            begin_Y = dim_div_proc_y * process_idx.y + (dim_mod_proc_y - 1 > process_idx.y? dim_mod_proc_y: process_idx.y);
-            begin_Z = dim_div_proc_z * process_idx.z + (dim_mod_proc_z - 1 > process_idx.z? dim_mod_proc_z: process_idx.z);
 
             printf("[%lu] beginX=%lu x=%lu beginY=%lu y=%lu beginZ=%lu z=%lu ud=%lu lr=%lu bf=%lu\n", rank, begin_X, dim_X, begin_Y, dim_Y, begin_Z, dim_Z, up_down_size, left_right_size, back_front_size);
 
@@ -189,9 +189,35 @@ class Matrix3D {
                 throw std::runtime_error("Unable to open file: " + filename);
             }
 
-            for (size_t i = 0; i < dim_X; i++) {
-                for (size_t j = 0; j < dim_Y; j++) {
-                    if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z), SEEK_SET) != 0) {
+            // for (size_t i = 0; i < dim_X; i++) {
+            //     for (size_t j = 0; j < dim_Y; j++) {
+            //         if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z), SEEK_SET) != 0) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
+            //                 "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+
+            //         if (fwrite(&(elems[i * stride_X + j * stride_Y]), sizeof(double), dim_Z, f) != dim_Z) {
+            //             fclose(f);
+            //             throw std::runtime_error(
+            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
+            //                 "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
+            //             );
+            //         }
+            //     }
+            // }
+
+            for (size_t i = 1; i < dim_X - 1; i++) {
+                for (size_t j = 1; j < dim_Y - 1; j++) {
+
+                    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                    // WARNING: THIS CODE ASSUMES THAT ONLY THE MIDDLE PART OF THE MATRIX IS OUTPUTTED AND IGNORES THE WALLS
+                    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+                    //if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z + 1), SEEK_SET) != 0) {
+                    if (fseek(f, 8 * (3 + (i + begin_X - 1) * (original_dim_Y - 2) * (original_dim_Z - 2) + (j + begin_Y - 1) * (original_dim_Z - 2) + begin_Z), SEEK_SET) != 0) {
                         fclose(f);
                         throw std::runtime_error(
                             "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
@@ -199,7 +225,7 @@ class Matrix3D {
                         );
                     }
 
-                    if (fwrite(&(elems[i * stride_X + j * stride_Y]), sizeof(double), dim_Z, f) != dim_Z) {
+                    if (fwrite(&(elems[i * stride_X + j * stride_Y + 1]), sizeof(double), actual_dim_Z, f) != actual_dim_Z) {
                         fclose(f);
                         throw std::runtime_error(
                             "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
@@ -209,25 +235,7 @@ class Matrix3D {
                 }
             }
 
-            // for (size_t i = 1; i < dim_X - 1; i++) {
-            //     for (size_t j = 1; j < dim_Y - 1; j++) {
-            //         if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z + 1), SEEK_SET) != 0) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
-            //                 "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-
-            //         if (fwrite(&(elems[i * stride_X + j * stride_Y + 1]), sizeof(double), actual_dim_Z, f) != actual_dim_Z) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
-            //                 "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-            //     }
-            // }
+            // to keep: this code tries to output the outer walls of the full matrix without overlaps
 
             // // TODO: update the throw message to better reflect the actual position and state of the program
 
@@ -370,11 +378,23 @@ class Matrix3D {
                 throw std::runtime_error("Unable to create file: " + filename);
             }
 
-            size_t s = original_dim_X * original_dim_Y * original_dim_Z * 8 + 3 * 8;
+             // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            // WARNING: THIS CODE ASSUMES THAT ONLY THE MIDDLE PART OF THE MATRIX IS OUTPUTTED AND IGNORES THE WALLS
+            //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-            std::fwrite(&original_dim_X, sizeof(size_t), 1, f);
-            std::fwrite(&original_dim_Y, sizeof(size_t), 1, f);
-            std::fwrite(&original_dim_Z, sizeof(size_t), 1, f);
+            size_t ogx = original_dim_X - 2;
+            size_t ogy = original_dim_Y - 2;
+            size_t ogz = original_dim_Z - 2;
+            size_t s = ogx * ogy * ogz * 8 + 3 * 8;
+            // size_t s = original_dim_X * original_dim_Y * original_dim_Z * 8 + 3 * 8;
+
+            std::fwrite(&ogx, sizeof(size_t), 1, f);
+            std::fwrite(&ogy, sizeof(size_t), 1, f);
+            std::fwrite(&ogz, sizeof(size_t), 1, f);
+
+            // std::fwrite(&original_dim_X, sizeof(size_t), 1, f);
+            // std::fwrite(&original_dim_Y, sizeof(size_t), 1, f);
+            // std::fwrite(&original_dim_Z, sizeof(size_t), 1, f);
 
             if (fseek(f, s - 1, SEEK_SET) != 0) {
                 fclose(f);
