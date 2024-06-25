@@ -245,13 +245,7 @@ class Matrix3D {
         }
 };
 
-struct errs {
-    double err_u;
-    double err_v;
-    double err_t;
-};
-
-inline errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx, const double RA, const double DELTA) {
+inline double updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx, const double RA, const double DELTA) {
     double* u_mat = u.elems;
     double* v_mat = v.elems;
     double* t_mat = t.elems;
@@ -306,10 +300,14 @@ inline errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx, const
             )
         );
 
-    double err_u = abs(u_mat[idx] - u_old);
-    double err_v = abs(v_mat[idx] - v_old);
-    double err_t = abs(t_mat[idx] - t_old);
-    return errs {err_u, err_v, err_t};
+    double err_u = std::abs(u_mat[idx] - u_old);
+    double err_v = std::abs(v_mat[idx] - v_old);
+    double err_t = std::abs(t_mat[idx] - t_old);
+
+    double err = std::max(err_u, err_v);
+    err = std::max(err, err_t);
+
+    return err;
 }
 
 int omp_thread_count() {
@@ -388,9 +386,7 @@ int main(int argc, char* argv[]) {
     int64_t nr_it = 0;
 
     while (/*!stop &&*/ nr_it < MAX_IT) {
-        double err_u = 0;
-        double err_v = 0;
-        double err_t = 0;
+        double err = 0;
 
         nr_it += 1;
 
@@ -406,10 +402,8 @@ int main(int argc, char* argv[]) {
             for (size_t j = 1; j < N2 - 1; j++) {
                 const size_t j_idx = j * STRIDE_Y;
                 for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
-                    errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
-                    err_u = std::max(err_u, errors.err_u);
-                    err_v = std::max(err_v, errors.err_v);
-                    err_t = std::max(err_t, errors.err_t);
+                    double new_err = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
+                    err = std::max(err, new_err);
                 }
             }
         }
@@ -420,10 +414,8 @@ int main(int argc, char* argv[]) {
             for (size_t j = 1; j < N2 - 1; j++) {
                 const size_t j_idx = j * STRIDE_Y;
                 for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
-                    errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
-                    err_u = std::max(err_u, errors.err_u);
-                    err_v = std::max(err_v, errors.err_v);
-                    err_t = std::max(err_t, errors.err_t);
+                    double new_err = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
+                    err = std::max(err, new_err);
                 }
             }
         }
@@ -454,11 +446,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        if (USE_DIFF &&
-            err_u < MIN_DIFF &&
-            err_v < MIN_DIFF &&
-            err_t < MIN_DIFF
-        ) { break; }
+        if (USE_DIFF && err < MIN_DIFF) { break; }
     }
 
     t.write_to_file(t_out + "_iter_" + std::to_string(nr_it) + ".bin");
