@@ -48,8 +48,8 @@ if __name__ == "__main__":
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
 
-        vmin = 0
-        vmax = 0.25
+        vmin = np.min(mat) - 0.00001
+        vmax = np.max(mat) + 0.00001
 
         kw = {
             'vmin': vmin,

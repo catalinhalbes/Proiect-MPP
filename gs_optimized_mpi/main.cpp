@@ -551,6 +551,15 @@ class Matrix3D {
                 }
             }
         }
+
+        void swap(Matrix3D& ot) { 
+            check_size(*this, ot);
+            double* aux;
+
+            aux = elems;
+            elems = ot.elems;
+            ot.elems = aux;
+        }
 };
 
 struct errs {
@@ -739,6 +748,10 @@ int main(int argc, char* argv[]) {
     Matrix3D v(v_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
     Matrix3D t(t_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
 
+    Matrix3D u_new(u_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
+    Matrix3D v_new(v_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
+    Matrix3D t_new(t_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
+
     Matrix3D::check_size(u, v);
     Matrix3D::check_size(u, t);
 
@@ -787,7 +800,7 @@ int main(int argc, char* argv[]) {
             const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
                 const size_t j_idx = j * STRIDE_Y;
-                for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
+                for (size_t k = 1 + (i + t.begin_X + j + t.begin_Y) % 2 ; k < N3 - 1; k += 2) {
                     errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
                     err_u = std::max(err_u, errors.err_u);
                     err_v = std::max(err_v, errors.err_v);
@@ -805,7 +818,7 @@ int main(int argc, char* argv[]) {
             const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
                 const size_t j_idx = j * STRIDE_Y;
-                for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
+                for (size_t k = 1 + (i + t.begin_X + j + t.begin_Y + 1) % 2; k < N3 - 1; k += 2) {
                     errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
                     err_u = std::max(err_u, errors.err_u);
                     err_v = std::max(err_v, errors.err_v);
