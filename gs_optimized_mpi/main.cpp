@@ -800,7 +800,7 @@ int main(int argc, char* argv[]) {
             const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
                 const size_t j_idx = j * STRIDE_Y;
-                for (size_t k = 1 + (i + t.begin_X + j + t.begin_Y) % 2 ; k < N3 - 1; k += 2) {
+                for (size_t k = 1 + (i + t.begin_X + j + t.begin_Y + t.begin_Z) % 2 ; k < N3 - 1; k += 2) {
                     errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
                     err_u = std::max(err_u, errors.err_u);
                     err_v = std::max(err_v, errors.err_v);
@@ -818,7 +818,7 @@ int main(int argc, char* argv[]) {
             const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
                 const size_t j_idx = j * STRIDE_Y;
-                for (size_t k = 1 + (i + t.begin_X + j + t.begin_Y + 1) % 2; k < N3 - 1; k += 2) {
+                for (size_t k = 1 + (i + t.begin_X + j + t.begin_Y + t.begin_Z + 1) % 2; k < N3 - 1; k += 2) {
                     errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
                     err_u = std::max(err_u, errors.err_u);
                     err_v = std::max(err_v, errors.err_v);
