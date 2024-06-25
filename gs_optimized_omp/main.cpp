@@ -7,28 +7,6 @@
 
 #include "omp.h"
 
-constexpr double RA = 500.0;
-constexpr double HEIGHT = 1.0;
-constexpr double MIN_DIFF = 1e-15;
-constexpr double COLD_WALL_TEMP = -1.0;
-constexpr double HOT_WALL_TEMP = 1.0;
-
-constexpr size_t MAX_IT = 1000;
-// how often to output results in iterations
-constexpr size_t STEP = 50;
-
-constexpr size_t X_ASPECT_RATIO = 1;
-constexpr size_t Y_ASPECT_RATIO = 1;
-constexpr size_t Z_ASPECT_RATIO = 1;
-
-constexpr size_t N = 100;
-constexpr size_t N1 = N * X_ASPECT_RATIO;
-constexpr size_t N2 = N * Y_ASPECT_RATIO;
-constexpr size_t N3 = N * Z_ASPECT_RATIO;
-
-constexpr double DELTA = HEIGHT / (double) N;
-constexpr double DELTA2 = DELTA * DELTA;
-
 class Matrix3D {
     public:
         double* elems;
@@ -111,7 +89,8 @@ class Matrix3D {
             this->stride_Y = ot.stride_Y;
             this->size = ot.size;
 
-            this->elems = std::exchange(ot.elems, nullptr);
+            this->elems = ot.elems;
+            ot.elems = nullptr;
         }
 
         Matrix3D(const std::string& filename) {
@@ -124,6 +103,8 @@ class Matrix3D {
             std::fread(&dim_Y, sizeof(size_t), 1, f);
             std::fread(&dim_Z, sizeof(size_t), 1, f);
 
+            stride_X = dim_Y * dim_Z;
+            stride_Y = dim_Z;
             size = dim_X * dim_Y * dim_Z;
 
             if (size == 0) {
@@ -182,14 +163,38 @@ class Matrix3D {
                 throw std::runtime_error("Unable to open file: " + filename);
             }
 
-            std::fwrite(&dim_X, sizeof(size_t), 1, f);
-            std::fwrite(&dim_Y, sizeof(size_t), 1, f);
-            std::fwrite(&dim_Z, sizeof(size_t), 1, f);
+            size_t dx = dim_X - 2;
+            size_t dy = dim_Y - 2;
+            size_t dz = dim_Z - 2;
 
-            if (std::fwrite(elems, sizeof(double), size, f) != size) {
-                std::fclose(f);
-                throw std::runtime_error("Unable to write all elements!");
+            std::fwrite(&dx, sizeof(size_t), 1, f);
+            std::fwrite(&dy, sizeof(size_t), 1, f);
+            std::fwrite(&dz, sizeof(size_t), 1, f);
+
+            for (size_t i = 1; i < dim_X - 1; i++) {
+                for (size_t j = 1; j < dim_Y - 1; j++) {
+                    if (fseek(f, 8 * (3 + (i - 1) * dx * dz + (j - 1) * dz), SEEK_SET) != 0) {
+                        fclose(f);
+                        throw std::runtime_error(
+                            "Unable seek in '" + filename + 
+                            "' loc (" + std::to_string(i) + ", " + std::to_string(j) + ")"
+                        );
+                    }
+
+                    if (fwrite(&(elems[i * stride_X + j * stride_Y + 1]), sizeof(double), dz, f) != dz) {
+                        fclose(f);
+                        throw std::runtime_error(
+                            "Unable to write all element in '" + filename + 
+                            "' loc (" + std::to_string(i) + ", " + std::to_string(j) + ")"
+                        );
+                    }
+                }
             }
+
+            // if (std::fwrite(elems, sizeof(double), size, f) != size) {
+            //     std::fclose(f);
+            //     throw std::runtime_error("Unable to write all elements!");
+            // }
             std::fclose(f);
         }
 
@@ -205,12 +210,10 @@ class Matrix3D {
 
         void swap(Matrix3D& ot) {
             check_size(*this, ot);
-            this->elems = std::exchange(ot.elems, this->elems);
-            this->dim_X = std::exchange(ot.dim_X, this->dim_X);
-            this->dim_Y = std::exchange(ot.dim_Y, this->dim_Y);
-            this->dim_Z = std::exchange(ot.dim_Z, this->dim_Z);
-            this->stride_X = std::exchange(ot.stride_X, this->stride_X);
-            this->stride_Y = std::exchange(ot.stride_Y, this->stride_Y);
+            double* aux;
+            aux = elems;
+            elems = ot.elems;
+            ot.elems = aux;
         }
 
         double max() const {
@@ -248,22 +251,19 @@ struct errs {
     double err_t;
 };
 
-inline errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx) {
+inline errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx, const double RA, const double DELTA) {
     double* u_mat = u.elems;
     double* v_mat = v.elems;
     double* t_mat = t.elems;
 
-    // size_t u_x_stride = u.stride_X;
-    // size_t u_y_stride = u.stride_Y;
-    // size_t v_x_stride = v.stride_X;
-    // size_t v_y_stride = v.stride_Y;
-    // size_t t_x_stride = t.stride_X;
-    // size_t t_y_stride = t.stride_Y;
+    const double DELTA2 = DELTA * DELTA;
 
-    // all strides are equal
+    // all strides should be equal
     const size_t x_stride = u.stride_X;
     const size_t y_stride = u.stride_Y;
     const size_t z_stride = 1;
+
+    // printf("(%llu, %llu, %llu)\n", idx / x_stride, (idx - (idx / x_stride * x_stride)) / y_stride, (idx - (idx / x_stride * x_stride)) % y_stride);
 
     // precompute the neighbors
     const size_t up_idx     = idx + z_stride; // z + 1
@@ -306,9 +306,9 @@ inline errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx) {
             )
         );
 
-    double err_u = std::abs(u_mat[idx] - u_old);
-    double err_v = std::abs(v_mat[idx] - v_old);
-    double err_t = std::abs(t_mat[idx] - t_old);
+    double err_u = abs(u_mat[idx] - u_old);
+    double err_v = abs(v_mat[idx] - v_old);
+    double err_t = abs(t_mat[idx] - t_old);
     return errs {err_u, err_v, err_t};
 }
 
@@ -322,156 +322,117 @@ int omp_thread_count() {
 int main(int argc, char* argv[]) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    if (argc < 7) {
-        printf("Usage: %s [u_mat_in] [v_mat_in] [t_mat_in] [u_out] [v_out] [t_out]\n", argv[0]);
-        return 1;
+    if (argc != 13) {
+        printf("Usage: %s <Ra> <height> <min_diff> <max_it> <save_every> <u_mat_in> <v_mat_in> <t_mat_in> <u_out> <v_out> <t_out> <num_threads>\n", argv[0]);
+        printf("Ra          - the Raylenght constant\n");
+        printf("height      - the z height\n");
+        printf("min_diff    - minimum difference between iterations to continue the simulation (<= 0 disabled)\n");
+        printf("max_it      - the maximum number of iterations\n");
+        printf("save_every  - specify how often to output intermediary results (<= 0 disabled)\n");
+        printf("num_threads - the number of threads to use\n");
+        printf("\ninput matrices:  <u_mat_in> <v_mat_in> <t_mat_in>\n");
+        printf("output matrices: <u_out> <v_out> <t_out>\n");
+        exit(1);
     }
 
-    std::string u_in = argv[1];
-    std::string v_in = argv[2];
-    std::string t_in = argv[3];
-    std::string u_out = argv[4];
-    std::string v_out = argv[5];
-    std::string t_out = argv[6];
+    const double RA       = std::stod(argv[1]);
+    const double HEIGHT   = std::stod(argv[2]);
+    const double MIN_DIFF = std::stod(argv[3]);
+    const int64_t MAX_IT  = std::stoll(argv[4]);
+    const int64_t STEP    = std::stoll(argv[5]);
 
-    Matrix3D u(N1, N2, N3, true);
-    Matrix3D v(N1, N2, N3, true);
-    Matrix3D t(N1, N2, N3, true);
-
-    omp_set_num_teams(8);
-    printf("num_threads = %d\n", omp_thread_count());
-
-    // x = 0 is the HOT wall
-    #pragma omp parallel for collapse(2)
-    for (size_t j = 0; j < N2; j += 1) {
-        for (size_t k = 0; k < N3; k++) {
-            t.set(0, j, k, HOT_WALL_TEMP);
-        }
-    } 
-
-    // x = (N1-1) is the COLD wall
-    #pragma omp parallel for collapse(2)
-    for (size_t j = 0; j < N2; j += 1) {
-        for (size_t k = 0; k < N3; k++) {
-            t.set(N1 - 1, j, k, COLD_WALL_TEMP);
-        }
+    if (MAX_IT <= 0) {
+        printf("Invalid maximum iterations! It should be strictly positive!\n");
+        exit(1);
     }
 
-    size_t nr_it = 0;
-    bool stop = false;
+    const std::string u_in    = argv[6];
+    const std::string v_in    = argv[7];
+    const std::string t_in    = argv[8];
+    const std::string u_out   = argv[9];
+    const std::string v_out   = argv[10];
+    const std::string t_out   = argv[11];
 
-    double err_u = 0;
-    double err_v = 0;
-    double err_t = 0;
+    const int64_t NR_THR = std::stoll(argv[12]);
 
-    const size_t SIZE = (u.dim_X - 2) * (u.dim_Y - 2) * (u.dim_Z - 2); // assuming that the matrices have equal size
-    const size_t SIZE_DIV_4 = SIZE / 4;
-    const size_t SIZE_DIV_4_MUL_4 = SIZE_DIV_4 * 4; // that moment you are paid per line of code
-    const size_t STRIDE = u.stride_X + u.stride_Y + 1; // stride on all directions
+    if (NR_THR <= 0) {
+        printf("Invalid number of threads! It should be strictly positive!\n");
+        exit(1);
+    }
+
+    omp_set_num_threads(NR_THR);
+
+    const bool USE_DIFF = MIN_DIFF > 0.0;
+    const bool DO_STEP = STEP > 0;
+
+    Matrix3D u(u_in);
+    Matrix3D v(v_in);
+    Matrix3D t(t_in);
+
+    // printf("u: x: %llu y: %llu z: %llu size: %llu strideX: %llu strideY: %llu\n", u.dim_X, u.dim_Y, u.dim_Z, u.size, u.stride_X, u.stride_Y);
+    // printf("v: x: %llu y: %llu z: %llu size: %llu strideX: %llu strideY: %llu\n", v.dim_X, v.dim_Y, v.dim_Z, v.size, v.stride_X, v.stride_Y);
+    // printf("t: x: %llu y: %llu z: %llu size: %llu strideX: %llu strideY: %llu\n", t.dim_X, t.dim_Y, t.dim_Z, t.size, t.stride_X, t.stride_Y);
+
+    Matrix3D::check_size(u, v);
+    Matrix3D::check_size(u, t);
+
+    const size_t N1 = u.dim_X;
+    const size_t N2 = u.dim_Y;
+    const size_t N3 = u.dim_Z;
+
+    const double DELTA = HEIGHT / (double) N3;
 
     const size_t STRIDE_X = u.stride_X;
     const size_t STRIDE_Y = u.stride_Y;
 
+    int64_t nr_it = 0;
+
     while (/*!stop &&*/ nr_it < MAX_IT) {
-        if (nr_it % STEP == 0) {
-            t.write_to_file(t_out + ".iter_" + std::to_string(nr_it) + ".bin");
-            u.write_to_file(u_out + ".iter_" + std::to_string(nr_it) + ".bin");
-            v.write_to_file(v_out + ".iter_" + std::to_string(nr_it) + ".bin");
-        }
+        double err_u = 0;
+        double err_v = 0;
+        double err_t = 0;
 
         nr_it += 1;
 
-        // #pragma omp parallel for collapse(2)
-        // for (size_t i = 1; i < N1 - 1; i++) {
-        //     for (size_t j = 1; j < N2 - 1; j++) {
-        //         for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
-        //             errs errors = updateCells(u, v, t, i * u.stride_X + j * u.stride_Y + k);
-        //             err_u = std::max(err_u, errors.err_u);
-        //             err_v = std::max(err_v, errors.err_v);
-        //             err_t = std::max(err_t, errors.err_t);
-        //         }
-        //     }
-        // }
-
-        // #pragma omp parallel for collapse(2)
-        // for (size_t i = 1; i < N1 - 1; i++) {
-        //     for (size_t j = 1; j < N2 - 1; j++) {
-        //         for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
-        //             errs errors = updateCells(u, v, t, i * u.stride_X + j * u.stride_Y + k);
-        //             err_u = std::max(err_u, errors.err_u);
-        //             err_v = std::max(err_v, errors.err_v);
-        //             err_t = std::max(err_t, errors.err_t);
-        //         }
-        //     }
-        // }
-
-        // black checkerboard
-        #pragma omp parallel for
-        for (size_t i = 0; i < SIZE_DIV_4; i++) {
-            errs errors = updateCells(u, v, t, i * 4 + 1 + STRIDE);
-            err_u = std::max(err_u, errors.err_u);
-            err_v = std::max(err_v, errors.err_v);
-            err_t = std::max(err_t, errors.err_t);
-
-            errs errors1 = updateCells(u, v, t, i * 4 + 2 + STRIDE);
-            err_u = std::max(err_u, errors1.err_u);
-            err_v = std::max(err_v, errors1.err_v);
-            err_t = std::max(err_t, errors1.err_t);
+        if (DO_STEP && nr_it % STEP == 0) {
+            t.write_to_file(t_out + "_iter_" + std::to_string(nr_it) + ".bin");
+            u.write_to_file(u_out + "_iter_" + std::to_string(nr_it) + ".bin");
+            v.write_to_file(v_out + "_iter_" + std::to_string(nr_it) + ".bin");
         }
 
-        if (SIZE_DIV_4_MUL_4 == SIZE - 2) {
-            errs errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + 1 + STRIDE);
-            err_u = std::max(err_u, errors.err_u);
-            err_v = std::max(err_v, errors.err_v);
-            err_t = std::max(err_t, errors.err_t);
-        } else if (SIZE_DIV_4_MUL_4 < SIZE - 2) {
-            errs errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + 1 + STRIDE);
-            err_u = std::max(err_u, errors.err_u);
-            err_v = std::max(err_v, errors.err_v);
-            err_t = std::max(err_t, errors.err_t);
-
-            errs errors1 = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + 2 + STRIDE);
-            err_u = std::max(err_u, errors1.err_u);
-            err_v = std::max(err_v, errors1.err_v);
-            err_t = std::max(err_t, errors1.err_t);
+        #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
+        for (size_t i = 1; i < N1 - 1; i++) {
+            const size_t i_idx = i * STRIDE_X;
+            for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t j_idx = j * STRIDE_Y;
+                for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
+                    errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
+                    err_u = std::max(err_u, errors.err_u);
+                    err_v = std::max(err_v, errors.err_v);
+                    err_t = std::max(err_t, errors.err_t);
+                }
+            }
         }
 
-        // white checkerboard
-        #pragma omp parallel for
-        for (size_t i = 0; i < SIZE_DIV_4; i++) {
-            errs errors = updateCells(u, v, t, i * 4 + STRIDE);
-            err_u = std::max(err_u, errors.err_u);
-            err_v = std::max(err_v, errors.err_v);
-            err_t = std::max(err_t, errors.err_t);
-
-            errs errors1 = updateCells(u, v, t, i * 4 + 1 + STRIDE);
-            err_u = std::max(err_u, errors1.err_u);
-            err_v = std::max(err_v, errors1.err_v);
-            err_t = std::max(err_t, errors1.err_t);
-        }
-
-        if (SIZE_DIV_4_MUL_4 == SIZE - 1) {
-            errs errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + STRIDE);
-            err_u = std::max(err_u, errors.err_u);
-            err_v = std::max(err_v, errors.err_v);
-            err_t = std::max(err_t, errors.err_t);
-        } else if (SIZE_DIV_4_MUL_4 < SIZE - 1) {
-            errs errors = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + STRIDE);
-            err_u = std::max(err_u, errors.err_u);
-            err_v = std::max(err_v, errors.err_v);
-            err_t = std::max(err_t, errors.err_t);
-
-            errs errors1 = updateCells(u, v, t, SIZE_DIV_4_MUL_4 + 1 + STRIDE);
-            err_u = std::max(err_u, errors1.err_u);
-            err_v = std::max(err_v, errors1.err_v);
-            err_t = std::max(err_t, errors1.err_t);
+        #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
+        for (size_t i = 1; i < N1 - 1; i++) {
+            const size_t i_idx = i * STRIDE_X;
+            for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t j_idx = j * STRIDE_Y;
+                for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
+                    errs errors = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
+                    err_u = std::max(err_u, errors.err_u);
+                    err_v = std::max(err_v, errors.err_v);
+                    err_t = std::max(err_t, errors.err_t);
+                }
+            }
         }
 
         // adiabatic conditions
         size_t yn1_idx = (N2 - 1) * STRIDE_Y;
         size_t yn2_idx = (N2 - 2) * STRIDE_Y;
 
-        #pragma omp parallel for collapse(2)
+        #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
         for (size_t i = 0; i < N1; i++) {
             size_t x_idx = i * STRIDE_X;
             for (size_t k = 0; k < N3; k++) {
@@ -483,7 +444,7 @@ int main(int argc, char* argv[]) {
         size_t zn1_idx = N3 - 1;
         size_t zn2_idx = N3 - 2;
 
-        #pragma omp parallel for collapse(2)
+        #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
         for (size_t i = 0; i < N1; i++) {
             size_t x_idx = i * STRIDE_X;
             for (size_t j = 0; j < N2; j++) {
@@ -493,22 +454,19 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        if (
+        if (USE_DIFF &&
             err_u < MIN_DIFF &&
             err_v < MIN_DIFF &&
             err_t < MIN_DIFF
-        ) {
-            stop = true;
-        }
+        ) { break; }
     }
 
-    u.write_to_file(u_out);
-    v.write_to_file(v_out);
-    t.write_to_file(t_out);
+    t.write_to_file(t_out + "_iter_" + std::to_string(nr_it) + ".bin");
+    u.write_to_file(u_out + "_iter_" + std::to_string(nr_it) + ".bin");
+    v.write_to_file(v_out + "_iter_" + std::to_string(nr_it) + ".bin");
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
 
-    printf("Iterations: %lu\n", nr_it);
-    printf("Time: %.2fms\n", duration.count() * 1000);
+    printf("%.2f\n", duration.count() * 1000);
 }

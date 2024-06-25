@@ -1,6 +1,7 @@
 #include <iostream>
 #include <utility>
 #include <stdexcept>
+#include <cstdlib>
 #include <cstdint>
 #include <string>
 #include <chrono>
@@ -87,7 +88,8 @@ class Matrix3D {
             this->stride_Y = ot.stride_Y;
             this->size = ot.size;
 
-            this->elems = std::exchange(ot.elems, nullptr);
+            this->elems = ot.elems;
+            ot.elems = nullptr;
         }
 
         Matrix3D(const std::string& filename) {
@@ -207,12 +209,10 @@ class Matrix3D {
 
         void swap(Matrix3D& ot) {
             check_size(*this, ot);
-            this->elems = std::exchange(ot.elems, this->elems);
-            this->dim_X = std::exchange(ot.dim_X, this->dim_X);
-            this->dim_Y = std::exchange(ot.dim_Y, this->dim_Y);
-            this->dim_Z = std::exchange(ot.dim_Z, this->dim_Z);
-            this->stride_X = std::exchange(ot.stride_X, this->stride_X);
-            this->stride_Y = std::exchange(ot.stride_Y, this->stride_Y);
+            double* aux;
+            aux = elems;
+            elems = ot.elems;
+            ot.elems = aux;
         }
 
         double max() const {
@@ -303,9 +303,9 @@ inline errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx, const
             )
         );
 
-    double err_u = std::abs(u_mat[idx] - u_old);
-    double err_v = std::abs(v_mat[idx] - v_old);
-    double err_t = std::abs(t_mat[idx] - t_old);
+    double err_u = abs(u_mat[idx] - u_old);
+    double err_v = abs(v_mat[idx] - v_old);
+    double err_t = abs(t_mat[idx] - t_old);
     return errs {err_u, err_v, err_t};
 }
 

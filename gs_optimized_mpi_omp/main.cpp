@@ -5,6 +5,7 @@
 #include <string>
 #include <chrono>
 #include <mpi.h>
+#include <omp.h>
 
 constexpr int U_TAG = 1;
 constexpr int V_TAG = 2;
@@ -536,6 +537,15 @@ class Matrix3D {
                 }
             }
         }
+
+        void swap(Matrix3D& ot) { 
+            check_size(*this, ot);
+            double* aux;
+
+            aux = elems;
+            elems = ot.elems;
+            ot.elems = aux;
+        }
 };
 
 struct errs {
@@ -606,17 +616,17 @@ inline errs updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx, const
 int main(int argc, char* argv[]) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    if (argc != 15) {
-        printf("Usage: %s <Ra> <height> <min_diff> <max_it> <save_every> <proc_x> <proc_y> <proc_z> <u_mat_in> <v_mat_in> <t_mat_in> <u_out> <v_out> <t_out>\n", argv[0]);
-        printf("Ra         - the Raylenght constant\n");
-        printf("height     - the z height\n");
-        printf("min_diff   - minimum difference between iterations to continue the simulation (<= 0 disabled)\n");
-        printf("max_it     - the maximum number of iterations\n");
-        printf("save_every - specify how often to output intermediary results (<= 0 disabled)\n");
-        printf("proc_x     - the number of splits on the X axis\n");
-        printf("proc_y     - the number of splits on the Y axis\n");
-        printf("proc_z     - the number of splits on the Z axis\n");
-
+    if (argc != 16) {
+        printf("Usage: %s <Ra> <height> <min_diff> <max_it> <save_every> <proc_x> <proc_y> <proc_z> <u_mat_in> <v_mat_in> <t_mat_in> <u_out> <v_out> <t_out> <num_threads>\n", argv[0]);
+        printf("Ra          - the Raylenght constant\n");
+        printf("height      - the z height\n");
+        printf("min_diff    - minimum difference between iterations to continue the simulation (<= 0 disabled)\n");
+        printf("max_it      - the maximum number of iterations\n");
+        printf("save_every  - specify how often to output intermediary results (<= 0 disabled)\n");
+        printf("proc_x      - the number of splits on the X axis\n");
+        printf("proc_y      - the number of splits on the Y axis\n");
+        printf("proc_z      - the number of splits on the Z axis\n");
+        printf("num_threads - the number of threads to be uses by each process\n");
         printf("\ninput matrices:  <u_mat_in> <v_mat_in> <t_mat_in>\n");
         printf("output matrices: <u_out> <v_out> <t_out>\n");
         exit(1);
@@ -664,6 +674,15 @@ int main(int argc, char* argv[]) {
     const std::string u_out   = argv[12];
     const std::string v_out   = argv[13];
     const std::string t_out   = argv[14];
+
+    const int64_t NR_THR = std::stoll(argv[15]);
+
+    if (NR_THR <= 0) {
+        printf("Invalid number of threads! It should be strictly positive!\n");
+        exit(1);
+    }
+
+    omp_set_num_threads(NR_THR);
 
     const bool USE_DIFF = MIN_DIFF > 0.0;
     const bool DO_STEP = STEP > 0;
@@ -772,6 +791,7 @@ int main(int argc, char* argv[]) {
             t.communicate(T_TAG);
         }
 
+        #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
         for (size_t i = 1; i < N1 - 1; i++) {
             const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
@@ -790,6 +810,7 @@ int main(int argc, char* argv[]) {
         v.communicate(V_TAG);
         t.communicate(T_TAG);
 
+        #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
         for (size_t i = 1; i < N1 - 1; i++) {
             const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
@@ -808,6 +829,7 @@ int main(int argc, char* argv[]) {
         size_t yn2_idx = (N2 - 2) * STRIDE_Y;
 
         if (back_cell < 0) { // no neighbor y = 0
+            #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
             for (size_t i = 0; i < N1; i++) {
                 size_t x_idx = i * STRIDE_X;
                 for (size_t k = 0; k < N3; k++) {
@@ -817,6 +839,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (front_cell < 0) { // no neighbor y = dim - 1
+            #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
             for (size_t i = 0; i < N1; i++) {
                 size_t x_idx = i * STRIDE_X;
                 for (size_t k = 0; k < N3; k++) {
@@ -829,6 +852,7 @@ int main(int argc, char* argv[]) {
         size_t zn2_idx = N3 - 2;
 
         if (down_cell < 0) { // no neighbor
+            #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
             for (size_t i = 0; i < N1; i++) {
                 size_t x_idx = i * STRIDE_X;
                 for (size_t j = 0; j < N2; j++) {
@@ -839,6 +863,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (up_cell < 0) { // no neighbor
+            #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
             for (size_t i = 0; i < N1; i++) {
                 size_t x_idx = i * STRIDE_X;
                 for (size_t j = 0; j < N2; j++) {
@@ -887,6 +912,7 @@ int main(int argc, char* argv[]) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
 
-    printf("%.2f\n", duration.count() * 1000);
+    if (rank == 0)
+        printf("%.2f\n", duration.count() * 1000);
     return 0;
 }
