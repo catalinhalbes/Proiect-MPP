@@ -427,8 +427,14 @@ int main(int argc, char* argv[]) {
     u.write_to_file(u_out + "_iter_" + std::to_string(nr_it) + ".bin");
     v.write_to_file(v_out + "_iter_" + std::to_string(nr_it) + ".bin");
 
+    // find max
+    double global_max = t.elems[0];
+    for (int i = 0; i < t.size; i++) {
+        global_max = std::max(global_max, t.elems[i]);
+    }
+
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
 
-    printf("%.2f\n", duration.count() * 1000);
+    printf("%.2f\n%f\n", duration.count() * 1000, global_max);
 }

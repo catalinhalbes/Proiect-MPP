@@ -396,10 +396,10 @@ int main(int argc, char* argv[]) {
             v.write_to_file(v_out + "_iter_" + std::to_string(nr_it) + ".bin");
         }
 
-        #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
+        #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
         for (size_t i = 1; i < N1 - 1; i++) {
-            const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t i_idx = i * STRIDE_X;
                 const size_t j_idx = j * STRIDE_Y;
                 for (size_t k = 1 + (i + j) % 2; k < N3 - 1; k += 2) {
                     double new_err = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
@@ -410,8 +410,8 @@ int main(int argc, char* argv[]) {
 
         #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
         for (size_t i = 1; i < N1 - 1; i++) {
-            const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t i_idx = i * STRIDE_X;
                 const size_t j_idx = j * STRIDE_Y;
                 for (size_t k = 1 + (i + j + 1) % 2; k < N3 - 1; k += 2) {
                     double new_err = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
@@ -426,8 +426,8 @@ int main(int argc, char* argv[]) {
 
         #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
         for (size_t i = 0; i < N1; i++) {
-            size_t x_idx = i * STRIDE_X;
             for (size_t k = 0; k < N3; k++) {
+                size_t x_idx = i * STRIDE_X;
                 t.elems[x_idx + k] = t.elems[x_idx + STRIDE_Y + k];
                 t.elems[x_idx + yn1_idx + k] = t.elems[x_idx + yn2_idx + k];
             }
@@ -438,8 +438,8 @@ int main(int argc, char* argv[]) {
 
         #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
         for (size_t i = 0; i < N1; i++) {
-            size_t x_idx = i * STRIDE_X;
             for (size_t j = 0; j < N2; j++) {
+                size_t x_idx = i * STRIDE_X;
                 size_t j_idx = j * STRIDE_Y;
                 t.elems[x_idx + j_idx] = t.elems[x_idx + j_idx + 1];
                 t.elems[x_idx + j_idx + zn1_idx] = t.elems[x_idx + j_idx + zn2_idx];
@@ -453,8 +453,17 @@ int main(int argc, char* argv[]) {
     u.write_to_file(u_out + "_iter_" + std::to_string(nr_it) + ".bin");
     v.write_to_file(v_out + "_iter_" + std::to_string(nr_it) + ".bin");
 
+    // find max
+    double global_max = t.elems[0];
+
+    #pragma omp parallel for reduction(max:global_max)
+    for (int i = 0; i < t.size; i++) {
+        global_max = std::max(global_max, t.elems[i]);
+    }
+
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
 
-    printf("%.2f\n", duration.count() * 1000);
+    printf("%.2f\n%f\n", duration.count() * 1000, global_max);
+    return 0;
 }

@@ -787,10 +787,10 @@ int main(int argc, char* argv[]) {
             t.communicate(T_TAG);
         }
 
-        #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
+        #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
         for (size_t i = 1; i < N1 - 1; i++) {
-            const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t i_idx = i * STRIDE_X;
                 const size_t j_idx = j * STRIDE_Y;
                 for (size_t k = 1 + (i + t.begin_X + j + t.begin_Y + t.begin_Z) % 2 ; k < N3 - 1; k += 2) {
                     double new_err = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
@@ -804,10 +804,10 @@ int main(int argc, char* argv[]) {
         v.communicate(V_TAG);
         t.communicate(T_TAG);
 
-        #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
+        #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
         for (size_t i = 1; i < N1 - 1; i++) {
-            const size_t i_idx = i * STRIDE_X;
             for (size_t j = 1; j < N2 - 1; j++) {
+                const size_t i_idx = i * STRIDE_X;
                 const size_t j_idx = j * STRIDE_Y;
                 for (size_t k = 1 + (i + t.begin_X + j + t.begin_Y + t.begin_Z + 1) % 2; k < N3 - 1; k += 2) {
                     double new_err = updateCells(u, v, t, i_idx + j_idx + k, RA, DELTA);
@@ -821,20 +821,20 @@ int main(int argc, char* argv[]) {
         size_t yn2_idx = (N2 - 2) * STRIDE_Y;
 
         if (back_cell < 0) { // no neighbor y = 0
-            #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
+            #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
             for (size_t i = 0; i < N1; i++) {
-                size_t x_idx = i * STRIDE_X;
                 for (size_t k = 0; k < N3; k++) {
+                    size_t x_idx = i * STRIDE_X;
                     t.elems[x_idx + k] = t.elems[x_idx + STRIDE_Y + k];
                 }
             }
         }
 
         if (front_cell < 0) { // no neighbor y = dim - 1
-            #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
+            #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
             for (size_t i = 0; i < N1; i++) {
-                size_t x_idx = i * STRIDE_X;
                 for (size_t k = 0; k < N3; k++) {
+                    size_t x_idx = i * STRIDE_X;
                     t.elems[x_idx + yn1_idx + k] = t.elems[x_idx + yn2_idx + k];
                 }
             }
@@ -844,10 +844,10 @@ int main(int argc, char* argv[]) {
         size_t zn2_idx = N3 - 2;
 
         if (down_cell < 0) { // no neighbor
-            #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
+            #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
             for (size_t i = 0; i < N1; i++) {
-                size_t x_idx = i * STRIDE_X;
                 for (size_t j = 0; j < N2; j++) {
+                    size_t x_idx = i * STRIDE_X;
                     size_t j_idx = j * STRIDE_Y;
                     t.elems[x_idx + j_idx] = t.elems[x_idx + j_idx + 1];
                 }
@@ -855,30 +855,30 @@ int main(int argc, char* argv[]) {
         }
 
         if (up_cell < 0) { // no neighbor
-            #pragma omp parallel for collapse(1) schedule(static, 8 * 32)
+            #pragma omp parallel for collapse(2) schedule(static, 8 * 32)
             for (size_t i = 0; i < N1; i++) {
-                size_t x_idx = i * STRIDE_X;
                 for (size_t j = 0; j < N2; j++) {
+                    size_t x_idx = i * STRIDE_X;
                     size_t j_idx = j * STRIDE_Y;
                     t.elems[x_idx + j_idx + zn1_idx] = t.elems[x_idx + j_idx + zn2_idx];
                 }
             }
         }
 
-        if (USE_DIFF && err < MIN_DIFF) { 
-            // current process should stop
-            // use gather to send message to stop
+        if (USE_DIFF) {
+            double max_err = 0;
+            MPI_Reduce(&err, &max_err, 1, MPI_DOUBLE, MPI_MAX, 0, mpi_comm_grid);
 
-            // receive broadcast
-            // depending on the broadcast continue or not
-            break; 
-        } 
-        else {
-            // current process wants to continue
-            // use gather to send message to continue
+            int should_stop = 0;
+            if (rank == 0 && max_err < MIN_DIFF) {
+                should_stop = 1;
+            }
 
-            // receive broadcast
-            // stop if early if receiving stop
+            MPI_Bcast(&should_stop, 1, MPI_INT, 0, mpi_comm_grid);
+
+            if (should_stop == 1) {
+                break;
+            }
         }
     }
 
@@ -896,11 +896,22 @@ int main(int argc, char* argv[]) {
     u.write_in_file(u_file);
     v.write_in_file(v_file);
 
+    // find max
+    double local_max = t.elems[0];
+
+    #pragma omp parallel for reduction(max:local_max)
+    for (int i = 0; i < t.size; i++) {
+        local_max = std::max(local_max, t.elems[i]);
+    }
+
+    double global_max = local_max;
+    MPI_Reduce(&local_max, &global_max, 1, MPI_DOUBLE, MPI_MAX, 0, mpi_comm_grid);
+
     MPI_Finalize();
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
 
     if (rank == 0)
-        printf("%.2f\n", duration.count() * 1000);
+        printf("%.2f\n%f\n", duration.count() * 1000, global_max);
     return 0;
 }

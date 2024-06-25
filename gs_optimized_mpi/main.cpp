@@ -840,20 +840,20 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        if (USE_DIFF && err < MIN_DIFF) { 
-            // current process should stop
-            // use gather to send message to stop
+        if (USE_DIFF) {
+            double max_err = 0;
+            MPI_Reduce(&err, &max_err, 1, MPI_DOUBLE, MPI_MAX, 0, mpi_comm_grid);
 
-            // receive broadcast
-            // depending on the broadcast continue or not
-            break; 
-        } 
-        else {
-            // current process wants to continue
-            // use gather to send message to continue
+            int should_stop = 0;
+            if (rank == 0 && max_err < MIN_DIFF) {
+                should_stop = 1;
+            }
 
-            // receive broadcast
-            // stop if early if receiving stop
+            MPI_Bcast(&should_stop, 1, MPI_INT, 0, mpi_comm_grid);
+
+            if (should_stop == 1) {
+                break;
+            }
         }
     }
 
@@ -871,10 +871,20 @@ int main(int argc, char* argv[]) {
     u.write_in_file(u_file);
     v.write_in_file(v_file);
 
+    // find max
+    double local_max = t.elems[0];
+    for (int i = 0; i < t.size; i++) {
+        local_max = std::max(local_max, t.elems[i]);
+    }
+
+    double global_max = local_max;
+    MPI_Reduce(&local_max, &global_max, 1, MPI_DOUBLE, MPI_MAX, 0, mpi_comm_grid);
+
     MPI_Finalize();
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
 
-    printf("%.2f\n", duration.count() * 1000);
+    if (rank == 0)
+        printf("%.2f\n%f\n", duration.count() * 1000, global_max);
     return 0;
 }
