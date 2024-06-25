@@ -160,14 +160,38 @@ class Matrix3D {
                 throw std::runtime_error("Unable to open file: " + filename);
             }
 
-            std::fwrite(&dim_X, sizeof(size_t), 1, f);
-            std::fwrite(&dim_Y, sizeof(size_t), 1, f);
-            std::fwrite(&dim_Z, sizeof(size_t), 1, f);
+            size_t dx = dim_X - 2;
+            size_t dy = dim_Y - 2;
+            size_t dz = dim_Z - 2;
 
-            if (std::fwrite(elems, sizeof(double), size, f) != size) {
-                std::fclose(f);
-                throw std::runtime_error("Unable to write all elements!");
+            std::fwrite(&dx, sizeof(size_t), 1, f);
+            std::fwrite(&dy, sizeof(size_t), 1, f);
+            std::fwrite(&dz, sizeof(size_t), 1, f);
+
+            for (size_t i = 1; i < dim_X - 1; i++) {
+                for (size_t j = 1; j < dim_Y - 1; j++) {
+                    if (fseek(f, 8 * (3 + (i - 1) * dx * dz + (j - 1) * dz), SEEK_SET) != 0) {
+                        fclose(f);
+                        throw std::runtime_error(
+                            "Unable seek in '" + filename + 
+                            "' loc (" + std::to_string(i) + ", " + std::to_string(j) + ")"
+                        );
+                    }
+
+                    if (fwrite(&(elems[i * stride_X + j * stride_Y + 1]), sizeof(double), dz, f) != dz) {
+                        fclose(f);
+                        throw std::runtime_error(
+                            "Unable to write all element in '" + filename + 
+                            "' loc (" + std::to_string(i) + ", " + std::to_string(j) + ")"
+                        );
+                    }
+                }
             }
+
+            // if (std::fwrite(elems, sizeof(double), size, f) != size) {
+            //     std::fclose(f);
+            //     throw std::runtime_error("Unable to write all elements!");
+            // }
             std::fclose(f);
         }
 
@@ -348,13 +372,13 @@ int main(int argc, char* argv[]) {
         double err_v = 0;
         double err_t = 0;
 
+        nr_it += 1;
+
         if (DO_STEP && nr_it % STEP == 0) {
             t.write_to_file(t_out + "_iter_" + std::to_string(nr_it) + ".bin");
             u.write_to_file(u_out + "_iter_" + std::to_string(nr_it) + ".bin");
             v.write_to_file(v_out + "_iter_" + std::to_string(nr_it) + ".bin");
         }
-
-        nr_it += 1;
 
         for (size_t i = 1; i < N1 - 1; i++) {
             const size_t i_idx = i * STRIDE_X;
