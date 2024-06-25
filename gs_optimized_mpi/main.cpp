@@ -591,9 +591,9 @@ inline double updateCells(Matrix3D& u, Matrix3D& v, Matrix3D& t, size_t idx, con
             )
         );
 
-    double err_u = std::abs(u_mat[idx] - u_old);
-    double err_v = std::abs(v_mat[idx] - v_old);
-    double err_t = std::abs(t_mat[idx] - t_old);
+    double err_u = abs(u_mat[idx] - u_old);
+    double err_v = abs(v_mat[idx] - v_old);
+    double err_t = abs(t_mat[idx] - t_old);
 
     double err = std::max(err_u, err_v);
     err = std::max(err, err_t);
