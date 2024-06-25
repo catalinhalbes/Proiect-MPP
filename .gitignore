@@ -5,6 +5,8 @@
 */out
 out
 in
+build
+hostfile*
 */figures*
 pdfs/
 venv/

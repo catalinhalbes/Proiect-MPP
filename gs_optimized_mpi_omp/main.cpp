@@ -900,7 +900,7 @@ int main(int argc, char* argv[]) {
     double local_max = t.elems[0];
 
     #pragma omp parallel for reduction(max:local_max)
-    for (int i = 0; i < t.size; i++) {
+    for (size_t i = 0; i < t.size; i++) {
         local_max = std::max(local_max, t.elems[i]);
     }
 
@@ -912,6 +912,6 @@ int main(int argc, char* argv[]) {
     std::chrono::duration<double> duration = end - start;
 
     if (rank == 0)
-        printf("%.2f\n%f\n", duration.count() * 1000, global_max);
+        printf("%.2f\n%.16f\n", duration.count() * 1000, global_max);
     return 0;
 }

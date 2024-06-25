@@ -457,13 +457,13 @@ int main(int argc, char* argv[]) {
     double global_max = t.elems[0];
 
     #pragma omp parallel for reduction(max:global_max)
-    for (int i = 0; i < t.size; i++) {
+    for (size_t i = 0; i < t.size; i++) {
         global_max = std::max(global_max, t.elems[i]);
     }
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = end - start;
 
-    printf("%.2f\n%f\n", duration.count() * 1000, global_max);
+    printf("%.2f\n%.16f\n", duration.count() * 1000, global_max);
     return 0;
 }
