@@ -1,11 +1,14 @@
 #include <iostream>
-#include <utility>
 #include <stdexcept>
 #include <cstdint>
 #include <string>
 #include <chrono>
 
 #include "omp.h"
+
+double abs(double val) {
+    return val < 0.0? -val: val;
+}
 
 class Matrix3D {
     public:

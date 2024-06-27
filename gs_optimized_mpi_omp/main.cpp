@@ -1,5 +1,4 @@
 #include <iostream>
-#include <utility>
 #include <stdexcept>
 #include <cstdint>
 #include <string>
@@ -10,6 +9,10 @@
 constexpr int U_TAG = 1;
 constexpr int V_TAG = 2;
 constexpr int T_TAG = 3;
+
+double abs(double val) {
+    return val < 0.0? -val: val;
+}
 
 struct indices {
     size_t x, y, z;

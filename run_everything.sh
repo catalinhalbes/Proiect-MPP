@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Testing setup
-reruns=2
-it=2
+reruns=1
+it=500
 ra=1000.0
 N1=200
 N2=200

@@ -1,10 +1,13 @@
 #include <iostream>
-#include <utility>
 #include <stdexcept>
 #include <cstdlib>
 #include <cstdint>
 #include <string>
 #include <chrono>
+
+double abs(double val) {
+    return val < 0.0? -val: val;
+}
 
 class Matrix3D {
     public:
