@@ -77,8 +77,6 @@ class Matrix3D {
             this->stride_Y = dim_Z;
             this->size = dim_X * dim_Y * dim_Z;
 
-            // printf("Allocating %llu elements\n", dim_X * dim_Y * dim_Z);
-
             if (init_zero) {
                 elems = new double[size]();
             }
@@ -319,16 +317,6 @@ int main(int argc, char* argv[]) {
                             )
                         )
                     );
-
-                    /**
-                     * the example was modifying the values both at the end and inside the for loops
-                     * changing the values inside the loops will make the iterations depend on the order of execution 
-                     * this is propably unintended, so this overwriting will be omitted
-                    */
-
-                    // u.set(i, j, k, u_new.get(i, j, k));
-                    // v.set(i, j, k, v_new.get(i, j, k));
-                    // t.set(i, j, k, t_new.get(i, j, k));
                 }
             }
         }

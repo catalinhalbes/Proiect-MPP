@@ -193,10 +193,6 @@ class Matrix3D {
                 }
             }
 
-            // if (std::fwrite(elems, sizeof(double), size, f) != size) {
-            //     std::fclose(f);
-            //     throw std::runtime_error("Unable to write all elements!");
-            // }
             std::fclose(f);
         }
 

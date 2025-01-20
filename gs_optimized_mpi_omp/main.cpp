@@ -155,8 +155,6 @@ class Matrix3D {
 
             elems = new double[size];
 
-            // printf("[%lu] beginX=%lu x=%lu beginY=%lu y=%lu beginZ=%lu z=%lu ud=%lu lr=%lu bf=%lu\n", rank, begin_X, dim_X, begin_Y, dim_Y, begin_Z, dim_Z, up_down_size, left_right_size, back_front_size);
-
             for (size_t i = 0; i < dim_X; i++) {
                 for (size_t j = 0; j < dim_Y; j++) {
                     if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z), SEEK_SET) != 0) {
@@ -224,136 +222,6 @@ class Matrix3D {
                 }
             }
 
-            // to keep: this code tries to output the outer walls of the full matrix without overlaps
-
-            // // TODO: update the throw message to better reflect the actual position and state of the program
-
-            // if (down_cell < 0) { // write z = 0 wall
-            //     for (size_t i = 0 + (left_cell >= 0); i < dim_X - 1 - (right_cell >= 0); i++) {
-            //         for (size_t j = 0 + (back_cell >= 0); j < dim_Y - 1 - (front_cell >= 0); j++) {
-            //             if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z), SEEK_SET) != 0) {
-            //                 fclose(f);
-            //                 throw std::runtime_error(
-            //                     "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
-            //                     "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //                 );
-            //             }
-
-            //             if (fwrite(&(elems[i * stride_X + j * stride_Y]), sizeof(double), 1, f) != 1) {
-            //                 fclose(f);
-            //                 throw std::runtime_error(
-            //                     "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
-            //                     "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //                 );
-            //             }
-            //         }
-            //     }
-            // }
-            // if (up_cell < 0) { // write z = dim - 1 wall
-            //     for (size_t i = 0 + (left_cell >= 0); i < dim_X - 1 - (right_cell >= 0); i++) {
-            //         for (size_t j = 0 + (back_cell >= 0); j < dim_Y - 1 - (front_cell >= 0); j++) {
-            //             if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + begin_Z + dim_Z - 1), SEEK_SET) != 0) {
-            //                 fclose(f);
-            //                 throw std::runtime_error(
-            //                     "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
-            //                     "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //                 );
-            //             }
-
-            //             if (fwrite(&(elems[i * stride_X + j * stride_Y + dim_Z - 1]), sizeof(double), 1, f) != 1) {
-            //                 fclose(f);
-            //                 throw std::runtime_error(
-            //                     "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
-            //                     "' loc (" + std::to_string(i + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //                 );
-            //             }
-            //         }
-            //     }
-            // }
-            // if (left_cell < 0) { // write x = 0 wall
-            //     int k = (int)(down_cell >= 0);
-            //     int current_dim_z = dim_Z - k - (up_cell >= 0);
-            //     for (size_t j = 0 + (back_cell >= 0); j < dim_Y - 1 - (front_cell >= 0); j++) {
-            //         if (fseek(f, 8 * (3 + begin_X * original_stride_X + (j + begin_Y) * original_stride_Y + k + begin_Z), SEEK_SET) != 0) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
-            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-
-            //         if (fwrite(&(elems[j * stride_Y + k]), sizeof(double), current_dim_z, f) != (size_t)current_dim_z) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
-            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-            //     }
-            // }
-            // if (right_cell < 0) { // write x = dim - 1 wall
-            //     int k = (int)(down_cell >= 0);
-            //     int current_dim_z = dim_Z - k - (up_cell >= 0);
-            //     for (size_t j = 0 + (back_cell >= 0); j < dim_Y - 1 - (front_cell >= 0); j++) {
-            //         if (fseek(f, 8 * (3 + (dim_X - 1 + begin_X) * original_stride_X + (j + begin_Y) * original_stride_Y + k + begin_Z), SEEK_SET) != 0) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
-            //                 "' loc (" + std::to_string(dim_X - 1 + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-
-            //         if (fwrite(&(elems[(dim_X - 1) * stride_X + j * stride_Y + k]), sizeof(double), current_dim_z, f) != (size_t)current_dim_z) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
-            //                 "' loc (" + std::to_string(dim_X - 1 + begin_X) + ", " + std::to_string(j + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-            //     }
-            // }
-            // if (back_cell < 0) { // write y = 0 wall
-            //     int k = (int)(down_cell >= 0);
-            //     int current_dim_z = dim_Z - k - (up_cell >= 0);
-            //     for (size_t i = 0 + (left_cell >= 0); i < dim_X - 1 - (right_cell >= 0); i++) {
-            //         if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + begin_Y * original_stride_Y + k + begin_Z), SEEK_SET) != 0) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
-            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-
-            //         if (fwrite(&(elems[i * stride_X + k]), sizeof(double), current_dim_z, f) != (size_t)current_dim_z) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
-            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-            //     }
-            // }
-            // if (front_cell < 0) { // write y = dim - 1 wall
-            //     int k = (int)(down_cell >= 0);
-            //     int current_dim_z = dim_Z - k - (up_cell >= 0);
-            //     for (size_t i = 0 + (left_cell >= 0); i < dim_X - 1 - (right_cell >= 0); i++) {
-            //         if (fseek(f, 8 * (3 + (i + begin_X) * original_stride_X + (dim_Y - 1 + begin_Y) * original_stride_Y + k + begin_Z), SEEK_SET) != 0) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not fseek for write in '" + filename + 
-            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(dim_Y - 1 + begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-
-            //         if (fwrite(&(elems[i * stride_X + (dim_Y - 1) * stride_Y + k]), sizeof(double), current_dim_z, f) != (size_t)current_dim_z) {
-            //             fclose(f);
-            //             throw std::runtime_error(
-            //                 "[" + std::to_string(rank) + "] Could not write all elements in '" + filename + 
-            //                 "' loc (" + std::to_string(begin_X) + ", " + std::to_string(begin_Y) + ", " + std::to_string(begin_Z) + ")"
-            //             );
-            //         }
-            //     }
-            // }
             std::fclose(f);
         }
 
@@ -367,7 +235,7 @@ class Matrix3D {
                 throw std::runtime_error("Unable to create file: " + filename);
             }
 
-             // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             // WARNING: THIS CODE ASSUMES THAT ONLY THE MIDDLE PART OF THE MATRIX IS OUTPUTTED AND IGNORES THE WALLS
             //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -375,15 +243,10 @@ class Matrix3D {
             size_t ogy = original_dim_Y - 2;
             size_t ogz = original_dim_Z - 2;
             size_t s = ogx * ogy * ogz * 8 + 3 * 8;
-            // size_t s = original_dim_X * original_dim_Y * original_dim_Z * 8 + 3 * 8;
 
             std::fwrite(&ogx, sizeof(size_t), 1, f);
             std::fwrite(&ogy, sizeof(size_t), 1, f);
             std::fwrite(&ogz, sizeof(size_t), 1, f);
-
-            // std::fwrite(&original_dim_X, sizeof(size_t), 1, f);
-            // std::fwrite(&original_dim_Y, sizeof(size_t), 1, f);
-            // std::fwrite(&original_dim_Z, sizeof(size_t), 1, f);
 
             if (fseek(f, s - 1, SEEK_SET) != 0) {
                 fclose(f);
@@ -399,9 +262,6 @@ class Matrix3D {
         }
 
         void communicate(int tag) {
-            // TODO: don't do copy if the process is at an edge
-            // TODO: precompute the offsets that transform the actual coord to local total coords
-
             // z = 0 face (down)
             if (down_cell >= 0) {
                 for (size_t i = 0; i < actual_dim_X; i++) {
@@ -728,17 +588,6 @@ int main(int argc, char* argv[]) {
 	MPI_Cart_shift(mpi_comm_grid, 0, 1, &left_cell, &right_cell);
 	MPI_Cart_shift(mpi_comm_grid, 1, 1, &back_cell, &front_cell);
 	MPI_Cart_shift(mpi_comm_grid, 2, 1, &down_cell, &up_cell);
-
-    // // 3D Cartesian coordinates
-	// std::cout << "Rank:" << rank << "\n"
-	// 	<< "Coords: (" << cx << ", " << cy << ", " << cz << ")" << std::endl;
-
-    // // neighbors
-	// std::cout << "Rank: " << rank << "\n"
-	// 	<< "Left: " << left_cell << "; Right: " << right_cell << "\n"
-	// 	<< "Back: " << back_cell << "; Front: " << front_cell << "\n"
-	// 	<< "Down: " << down_cell << "; Up: " << up_cell << "\n"
-	// 	<< std::endl;
 
     Matrix3D u(u_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
     Matrix3D v(v_in, {Cx, Cy, Cz}, {cx, cy, cz}, left_cell, right_cell, back_cell, front_cell, down_cell, up_cell, mpi_comm_grid);
