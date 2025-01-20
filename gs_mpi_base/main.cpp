@@ -45,17 +45,6 @@ int main(int argc, char* argv[]) {
 	MPI_Cart_shift(MPI_COMM_GRID, 1, 1, &back_cell, &front_cell);
 	MPI_Cart_shift(MPI_COMM_GRID, 2, 1, &down_cell, &up_cell);
 
-	// 3D Cartesian coordinates
-	/*std::cout << "Rank:" << rank << "\n"
-		<< "Coords: (" << cx << ", " << cy << ", " << cz << ")" << std::endl;*/
-
-	// neighbors
-	/*std::cout << "Rank: " << rank << "\n"
-		<< "Left: " << left_cell << "; Right: " << right_cell << "\n"
-		<< "Back: " << back_cell << "; Front: " << front_cell << "\n"
-		<< "Down: " << down_cell << "; Up: " << up_cell << "\n"
-		<< std::endl;*/
-
 	MPI_Finalize();
 	return 0;
 }

@@ -61,8 +61,6 @@ class Matrix3D {
             this->stride_Y = dim_Z;
             this->size = dim_X * dim_Y * dim_Z;
 
-            // printf("Allocating %llu elements\n", dim_X * dim_Y * dim_Z);
-
             if (init_zero) {
                 elems = new double[size]();
             }
@@ -193,10 +191,6 @@ class Matrix3D {
                 }
             }
 
-            // if (std::fwrite(elems, sizeof(double), size, f) != size) {
-            //     std::fclose(f);
-            //     throw std::runtime_error("Unable to write all elements!");
-            // }
             std::fclose(f);
         }
 
@@ -349,10 +343,6 @@ int main(int argc, char* argv[]) {
     Matrix3D u(u_in);
     Matrix3D v(v_in);
     Matrix3D t(t_in);
-
-    // printf("u: x: %llu y: %llu z: %llu size: %llu strideX: %llu strideY: %llu\n", u.dim_X, u.dim_Y, u.dim_Z, u.size, u.stride_X, u.stride_Y);
-    // printf("v: x: %llu y: %llu z: %llu size: %llu strideX: %llu strideY: %llu\n", v.dim_X, v.dim_Y, v.dim_Z, v.size, v.stride_X, v.stride_Y);
-    // printf("t: x: %llu y: %llu z: %llu size: %llu strideX: %llu strideY: %llu\n", t.dim_X, t.dim_Y, t.dim_Z, t.size, t.stride_X, t.stride_Y);
 
     Matrix3D::check_size(u, v);
     Matrix3D::check_size(u, t);
